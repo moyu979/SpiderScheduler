@@ -1,0 +1,8 @@
+grpcio
+grpcio-tools
+beautifulsoup4
+selenium
+webdriver-manager
+sqlite3
+moviepy
+you_get

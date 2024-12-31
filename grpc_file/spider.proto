@@ -1,0 +1,32 @@
+syntax = "proto3";
+// 定义一个请求消息
+message downloadRequest {
+  int32 downloadNumber=1;
+}
+message User {
+  string userId=1;
+}
+
+message Video{
+  string VideoId=1;
+}
+// 定义一个响应消息
+message Reply {
+  string info=1;
+}
+
+message NullMessage{
+  ;
+}
+// 定义一个服务
+service Server {
+  // 定义一个远程调用方法
+  rpc StartDownload (downloadRequest) returns (Reply);
+  rpc StopDownload(NullMessage) returns (Reply);
+  rpc DownloadUser(User) returns (Reply);
+
+  rpc SetPriority(Video) returns (Reply);
+  rpc AddUser (User) returns (Reply);
+  
+  rpc ReloadConf(NullMessage) returns (Reply);
+}

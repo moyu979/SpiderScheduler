@@ -5,6 +5,7 @@ CREATE TABLE videos(
     kind TEXT,
     state TEXT,
     downloadDate TEXT,
+    downloadPriority TEXT DEFAULT 0,
     UNIQUE (video_number)
 );
 

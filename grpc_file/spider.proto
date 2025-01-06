@@ -18,6 +18,11 @@ message Reply {
 message NullMessage{
   ;
 }
+
+message SetPriorityMessage{
+  string VideoId=1;
+  string priority=2;
+}
 // 定义一个服务
 service Server {
   // 定义一个远程调用方法
@@ -25,7 +30,7 @@ service Server {
   rpc StopDownload(NullMessage) returns (Reply);
   rpc DownloadUser(User) returns (Reply);
 
-  rpc SetPriority(Video) returns (Reply);
+  rpc SetPriority(SetPriorityMessage) returns (Reply);
   rpc AddUser (User) returns (Reply);
   
   rpc ReloadConf(NullMessage) returns (Reply);

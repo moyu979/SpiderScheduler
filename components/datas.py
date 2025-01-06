@@ -11,11 +11,13 @@ conf={
     "port":50051,
     "db_name":"test.db",
     "not_work_mode":True,
-    "update_interval":1
+    "update_interval":1,
+    "download_priority":(1,0,-1)
 }
-path="./conf.json"
-with open(path, "r", encoding="utf-8") as file:
-    conf = json.load(file)
+if os.path.exists("./conf.json"):
+    path="./conf.json"
+    with open(path, "r", encoding="utf-8") as file:
+        conf = json.load(file)
 
 def save_data(path="./conf.json"):
     with open(path, "w", encoding="utf-8") as file:

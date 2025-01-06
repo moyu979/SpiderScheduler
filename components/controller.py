@@ -17,9 +17,6 @@ class controller:
         self.init_browser()
         self.init_database()
 
-        self.conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"), check_same_thread=False)
-        self.cursor = self.conn.cursor()
-
     def init_browser(self):
         chrome_options = Options()
         chrome_options.add_argument("--headless")
@@ -55,24 +52,37 @@ class controller:
 
     def add_a_user(self,user_id):
         try:
-            self.cursor.execute(
+            conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
+            cursor = conn.cursor()
+            cursor.execute(
                 "INSERT INTO user (userId,addTime) VALUES (?,?)",
                 (user_id,timeControl.fileTimeSecond())
             )
-            self.conn.commit()
+            conn.commit()
+            conn.close()
         except Exception:
             logging.info("user already in list")
             return 
         self.updateUser(user_id)
         
-    def updateUser(self,user_id,take_all=False):
-        logging.error(f"updateUser not finished")
+
                 
     def updateAllUser(self):
-        users=self.cursor.execute("SELECT * FROM user").fetchall()
+        conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
+        cursor = conn.cursor()
+        users=cursor.execute("SELECT * FROM user").fetchall()
+        conn.close()
         for user in users:
             self.updateUser(user[0])
-
+            
+    def changeDownloadPriority(self,video_number,priority=0):
+        conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
+        cursor = conn.cursor()
+        cursor.execute("UPDATE videos SET downloadPriority=? where video_number=?",(priority,video_number))
+        conn.commit()
+        conn.close()
+    
+    def updateUser(self,user_id,take_all=False):
+        logging.error(f"updateUser not finished")
     def get_videos(self,soup,user_id) -> bool:
         logging.error(f"updateUser not finished")
-        

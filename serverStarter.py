@@ -15,15 +15,18 @@ import components.downloader as downloader
 import grpc
 import spider_pb2 as spider_pb2
 import spider_pb2_grpc as spider_pb2_grpc
+
 from components.decorator import show_process
-# 实现 Greeter 服务
+
 class Server(spider_pb2_grpc.ServerServicer):
     def __init__(self):
         self.controll=controller.controller()
         self.download=downloader.downloader()
+
         self.update_checker=threading.Thread(target=self.controll.daily_update)
         self.update_checker.daemon=True
         self.update_checker.start()
+
         logging.info(f"init finish")
 
     def StartDownload(self, request, context):
@@ -36,6 +39,7 @@ class Server(spider_pb2_grpc.ServerServicer):
         else:
             threading.Thread(target=self.download.downloadSome,kwargs={"download_number":request.downloadNumber}).start()
         return answer
+    
     @show_process.show_process
     def StopDownload(self, request, context):
         self.download.continue_download=False
@@ -60,7 +64,7 @@ class Server(spider_pb2_grpc.ServerServicer):
         return answer
     
     def SetPriority(self, request, context):
-        self.download.priority(request.VideoId)
+        self.controll.changeDownloadPriority(request.VideoId,request.priority)
         answer=spider_pb2.Reply(info=f"set Priority {request.VideoId} success")
         return answer
 

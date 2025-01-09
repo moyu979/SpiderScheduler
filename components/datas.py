@@ -1,6 +1,7 @@
 import os
 import json
 conf={
+    "auto_check":False,
     "waiting_play":False,
     "random_download":False,
     "sleep_second":10,
@@ -11,7 +12,7 @@ conf={
     "port":50051,
     "db_name":"test.db",
     "not_work_mode":True,
-    "update_interval":1,
+    "update_interval":86400,
     "download_priority":(1,0,-1)
 }
 if os.path.exists("./conf.json"):

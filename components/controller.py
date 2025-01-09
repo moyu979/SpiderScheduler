@@ -25,13 +25,14 @@ class controller:
         self.driver = webdriver.Chrome(service=service,options=chrome_options) 
 
     def daily_update(self):
-        try:
-            while True:
-                logging.info(f"Sleeping for {datas.conf["update_interval"]} seconds...")
-                self.updateAllUser()
-                time.sleep(datas.conf["update_interval"])  # sleep 5 seconds
-        except KeyboardInterrupt:
-            print("Program interrupted!")
+        while True:
+            if datas.conf["auto_check"]:
+                try:
+                    self.updateAllUser()
+                except KeyboardInterrupt:
+                    print("Program interrupted!")
+            logging.info(f"Sleeping for {datas.conf["update_interval"]} seconds...")
+            time.sleep(datas.conf["update_interval"])  # sleep 5 seconds
         
 
     def init_database(self):
@@ -65,8 +66,7 @@ class controller:
             return 
         self.updateUser(user_id)
         
-
-                
+            
     def updateAllUser(self):
         conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
         cursor = conn.cursor()
@@ -74,7 +74,7 @@ class controller:
         conn.close()
         for user in users:
             self.updateUser(user[0])
-            
+
     def changeDownloadPriority(self,video_number,priority=0):
         conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
         cursor = conn.cursor()

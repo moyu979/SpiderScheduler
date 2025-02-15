@@ -8,7 +8,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 from time import sleep
-from moviepy.editor import VideoFileClip
+
 from .decorator import show_process
 
 from . import timeControl

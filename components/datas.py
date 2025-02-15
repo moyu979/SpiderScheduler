@@ -13,7 +13,8 @@ conf={
     "db_name":"test.db",
     "not_work_mode":True,
     "update_interval":86400,
-    "download_priority":(1,0,-1)
+    "download_priority":(1,0,-1),
+    "use_proxy":None
 }
 if os.path.exists("./conf.json"):
     path="./conf.json"

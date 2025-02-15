@@ -67,6 +67,11 @@ class Server(spider_pb2_grpc.ServerServicer):
         self.controll.changeDownloadPriority(request.VideoId,request.priority)
         answer=spider_pb2.Reply(info=f"set Priority {request.VideoId} success")
         return answer
+    
+    def Test(self, request, context):
+        self.controll.test()
+        answer=spider_pb2.NullMessage()
+        return answer
 
 
         

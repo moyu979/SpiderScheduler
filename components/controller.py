@@ -84,5 +84,9 @@ class controller:
     
     def updateUser(self,user_id,take_all=False):
         logging.error(f"updateUser not finished")
+
     def get_videos(self,soup,user_id) -> bool:
         logging.error(f"updateUser not finished")
+
+    def test(self):
+        logging.info("testing")

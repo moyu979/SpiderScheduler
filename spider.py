@@ -72,6 +72,11 @@ class MyCmd(cmd.Cmd):
         self.conf["port"]=data
         self.do_writeConf()
 
+    def do_test(self,line):
+        with grpc.insecure_channel(self.channal) as channel:
+            stub = spider_pb2_grpc.ServerStub(channel)
+            response = stub.Test(spider_pb2.NullMessage())
+
 
 if __name__ == '__main__':
     MyCmd().cmdloop()

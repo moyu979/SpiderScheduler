@@ -34,4 +34,5 @@ service Server {
   rpc AddUser (User) returns (Reply);
   
   rpc ReloadConf(NullMessage) returns (Reply);
+  rpc Test(NullMessage) returns (NullMessage);
 }

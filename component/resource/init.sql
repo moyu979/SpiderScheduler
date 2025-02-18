@@ -1,24 +1,24 @@
-CREATE TABLE videos(
-    upTime TEXT,
-    video_number TEXT,
+CREATE TABLE works(
+    upTime TEXT DEFAULT "",
+    workNumber TEXT,
     title TEXT,
     kind TEXT,
     state TEXT,
     downloadDate TEXT,
     downloadPriority TEXT DEFAULT 0,
-    UNIQUE (video_number)
+    UNIQUE (workNumber)
 );
 
 CREATE TABLE STREAM(
-    uploader TEXT,
+    userId TEXT,
     time TEXT,
     title TEXT
 );
 
 CREATE TABLE upload(
-    uploader TEXT not NULL,
-    video_number TEXT,
-    UNIQUE (uploader,video_number)
+    userId TEXT not NULL,
+    workNumber TEXT,
+    UNIQUE (userId,workNumber)
 );
 
 CREATE TABLE user(

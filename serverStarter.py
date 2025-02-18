@@ -3,6 +3,8 @@ import time
 import os
 import sys
 import logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 from concurrent import futures
 
 # 将当前目录加入 sys.path

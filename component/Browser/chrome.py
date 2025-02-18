@@ -43,4 +43,8 @@ class Browser:
             logging.info(f"成功加载cookie文件{conf["login_net"]}")
 
     def get(self,url):
-        return self.driver.get(url)
+        self.page_source=self.driver.get(url)
+
+    def get_driver(self):
+        return self.driver
+        

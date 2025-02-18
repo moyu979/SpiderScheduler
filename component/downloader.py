@@ -10,8 +10,6 @@ from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
 import pickle
 import logging
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
 from time import sleep
 
 
@@ -23,7 +21,7 @@ class Downloader:
     def __init__(self):
         self.continue_download=True
         self.working=False
-        self.init_browser()
+        self.driver=Browser().get_driver()
 
     def download_all(self):
         self.working=True
@@ -114,6 +112,4 @@ class Downloader:
         return False
     
     def _download(self,data):
-        logging.info(f"正在下载{data}")
-        logging.info("这个是需要完成的功能")
-        return True
+        logging.info("这个是需要你完成的！请完成获取用户的投稿并且写到数据库的功能")

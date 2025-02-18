@@ -1,8 +1,11 @@
 import time
 import sqlite3
 import os
-
 import logging
+
+import numpy as np
+
+from bs4 import BeautifulSoup
 from component.tools import timeControl
 from component import datas
 
@@ -10,8 +13,10 @@ from component.Browser.chrome import Browser
 from component.database.initDatabase import init_database
 class Controller:
     def __init__(self):
-        self.driver=Browser()
+        self.driver=Browser().get_driver()
+        
         init_database()
+        logging.info("初始化成功")
 
     def daily_update(self):
         while True:
@@ -74,6 +79,3 @@ class Controller:
         
     def _update_user(self,user_id):
         logging.info("这个是需要你完成的！请完成获取用户的投稿并且写到数据库的功能")
-
-if __name__=="__main__":
-    controller=Controller()

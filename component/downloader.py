@@ -112,4 +112,76 @@ class Downloader:
         return False
     
     def _download(self,data):
-        logging.info("这个是需要你完成的！请完成获取用户的投稿并且写到数据库的功能")
+        logging.info(f"正在下载{data}")
+        work_id=data[1]
+        user=self._get_user(data)
+        total_save_path=os.path.join(datas.conf["data_path"],f"{user}")
+        if not os.path.exists(total_save_path):
+            os.mkdir(total_save_path)
+        work_save_path=os.path.join(total_save_path,f"{work_id}")
+        if not os.path.exists(work_save_path):
+            os.mkdir(work_save_path)
+        
+        self.driver.get(f"https://www.pixiv.net/artworks/{work_id}")
+        html_content = self.driver.page_source
+        
+        with open(os.path.join(work_save_path,"page.html"),"w",encoding='utf-8') as f:
+            f.write(html_content)
+
+        soup = BeautifulSoup(html_content, 'html.parser')
+        data=soup.find(class_="sc-emr523-2 wEKy")
+        count=0
+        if data is None:
+            main=soup.find("main")
+            all_img=main.find_all("figure")
+            for img in all_img:
+                adata=img.find("a")
+                if adata is not None:
+                    url=adata.get("href")
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                        "Referer": f"https://www.pixiv.net/artworks/{work_id}" # 标明从哪个网页跳转
+                    }
+                    response = requests.get(url,headers=headers)
+                    if response.status_code == 200:
+                        with open(os.path.join(work_save_path,f"{count}.png"), "wb") as file:
+                            file.write(response.content)
+                    count=count+1
+        else:
+            self.driver.get(f"https://www.pixiv.net/artworks/{work_id}#1")
+            self.driver.refresh()
+            html_content = self.driver.page_source
+            with open(os.path.join(work_save_path,"page_all.html"),"w",encoding='utf-8') as f:
+                f.write(html_content)
+            soup = BeautifulSoup(html_content, 'html.parser')
+            data=soup.find(class_="sc-1oz5uvo-1 ivxzyL")
+            img_group=data.find_all("a")
+            count=0
+            for a in img_group:
+                url=a.get("href")
+                if url.endswith(".png"):
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                        "Referer": f"https://www.pixiv.net/artworks/{work_id}" # 标明从哪个网页跳转
+                    }
+                    response = requests.get(url,headers=headers)
+                    if response.status_code == 200:
+                        with open(os.path.join(work_save_path,f"{count}.png"), "wb") as file:
+                            file.write(response.content)
+                    count=count+1
+                    logging.info("下载成功")
+
+        logging.info("下载成功")
+        return True
+    
+    def _get_user(self,data):
+        conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
+        cursor = conn.cursor()
+        res=cursor.execute("select * from upload where workNumber=?",(data[1],)).fetchall()
+        conn.close()
+        if len(res)==0:
+            return 0
+        else:
+            return res[0][0] 
+
+                    

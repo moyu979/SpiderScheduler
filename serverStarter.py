@@ -36,41 +36,17 @@ class Server(spider_pb2_grpc.ServerServicer):
 
     def StartDownload(self, request, context):
         answer=spider_pb2.Reply(info=f"download {request.downloadNumber} videos start")
-        if self.downloader.working: 
-            answer.info="already has a downloading mission"
-            return answer
-        if request.downloadNumber==0:
-            threading.Thread(target=self.downloader.download_all).start()
-        else:
-            threading.Thread(target=self.downloader.download_some,kwargs={"download_number":request.downloadNumber}).start()
+        self.downloader.start_event.set()
         return answer
     
-
     def StopDownload(self, request, context):
-        self.downloader.continue_download=False
-        while self.download.working:
-            time.sleep(1)
-        self.downloader.continue_download=True
-        answer=spider_pb2.Reply(info="")
-        return answer
-    
-    def DownloadUser(self, request, context):
-        answer=spider_pb2.Reply(info=f"download {request.userId} user start")
-        if self.downloader.working: 
-            answer.info="already has a downloading mission"
-            return answer
-        threading.Thread(target=self.downloader.downloadUser,kwargs={"user_id":request.userId}).start()
-        return answer
-    
+        answer=spider_pb2.Reply(info=f"stop {request.downloadNumber} videos start")
+        self.downloader.start_event.clear()
+        return answer    
 
     def AddUser(self, request, context):
-        threading.Thread(target=self.controller.add_a_user,kwargs={"user_id":request.userId}).start()
-        answer=spider_pb2.Reply(info=f"add user {request.userId} start")
-        return answer
-    
-    def SetPriority(self, request, context):
-        self.controller.change_work_priority(request.VideoId,request.priority)
-        answer=spider_pb2.Reply(info=f"set Priority {request.VideoId} success")
+        answer=spider_pb2.Reply(info=f"add {request.uid}")
+        self.register.add_a_user(request.uid)
         return answer
     
     def Test(self, request, context):

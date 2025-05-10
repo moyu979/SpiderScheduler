@@ -1,6 +1,6 @@
 #用于对现有用户更新
 from abc import ABC
-from component.tools.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor as ThreadPoolExecutor
+from component.assistant.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor as ThreadPoolExecutor
 import datetime
 import threading
 import time

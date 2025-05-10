@@ -1,6 +1,6 @@
 #用来下载的
 from abc import ABC, abstractmethod
-from component.tools.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor as ThreadPoolExecutor
+from component.assistant.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor as ThreadPoolExecutor
 import datetime
 from time import sleep
 from typing import Any

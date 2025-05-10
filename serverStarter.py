@@ -10,22 +10,27 @@ from concurrent import futures
 # 将当前目录加入 sys.path
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),"components"))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),"grpc_file"))
-from component import datas
-from component.controller import Controller
-from component.downloader import Downloader
 
 import grpc
 import spider_pb2 as spider_pb2
 import spider_pb2_grpc as spider_pb2_grpc
 
+from component.register import Register as Register
+from component.updater import Updater as Updater
+from component.downloader import Downloader as Downloader
+
+import pixiv_downloader as pixiv_downloader
+import pixiv_updater as pixiv_updater
+import component.assistant.initer as initer
+
+import component.assistant.data as datas
 class Server(spider_pb2_grpc.ServerServicer):
     def __init__(self):
-        self.controller=Controller()
-        self.downloader=Downloader()
+        initer.init()
 
-        self.update_checker=threading.Thread(target=self.controller.daily_update)
-        self.update_checker.daemon=True
-        self.update_checker.start()
+        self.updater=Updater(pixiv_updater.Updater)
+        self.register=Register(pixiv_updater.Updater)
+        self.downloader=Downloader(pixiv_downloader.Downloader)
 
         logging.info(f"init finish")
 
@@ -82,15 +87,18 @@ class Server(spider_pb2_grpc.ServerServicer):
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
     spider_pb2_grpc.add_ServerServicer_to_server(Server(), server)
-    server.add_insecure_port(f'[::]:{datas.conf["port"]}')  # 监听端口 50051
-    logging.info(f"Server started on port {datas.conf["port"]}...")
+    server.add_insecure_port(f'[::]:{datas.get("port")}')  # 监听端口 50051
+    logging.info(f"Server started on port {datas.get("port")}...")
     server.start()
-    try:
-        time.sleep(1000)
-    except KeyboardInterrupt:
-        datas.save_data()
-        server.stop(0)
-        return
+    while True:
+        try:
+            time.sleep(10)
+            print(123)
+        except KeyboardInterrupt:
+            logging.info("Stopping the server...")
+            datas.to_json()
+            server.stop(0)
+            return
 
 if __name__ == '__main__':
     serve()

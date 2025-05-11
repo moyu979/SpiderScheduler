@@ -45,8 +45,32 @@ class Server(spider_pb2_grpc.ServerServicer):
         return answer    
 
     def AddUser(self, request, context):
-        answer=spider_pb2.Reply(info=f"add {request.uid}")
-        self.register.add_a_user(request.uid)
+        answer=spider_pb2.Reply(info=f"add {request.userId}")
+        self.register.add_a_user(request.userId)
+        return answer
+    def AddWork(self, request, context):
+        answer=spider_pb2.Reply(info=f"add {request.WorkId}")
+        self.register.add_work(request.WorkId)
+        return answer
+    
+    def RemoveUser(self, request, context):
+        answer=spider_pb2.Reply(info=f"tremove {request.userId}")
+        self.register.remove_user(request.userId)
+        return answer
+    
+    def RemoveWork(self, request, context):
+        answer=spider_pb2.Reply(info=f"remove {request.WorkId}")
+        self.register.remove_work(request.WorkId)
+        return answer
+    
+    def SetPriority(self, request, context):
+        answer=spider_pb2.Reply(info=f"set {request.WorkId} priority to {request.priority}")
+        self.register.set_priority(request.WorkId,request.priority)
+        return answer
+
+
+    def GetDownloadNumber(self, request, context):
+        answer=spider_pb2.Reply(info=f"already download {self.downloader._already_downloaded}")
         return answer
     
     def Test(self, request, context):

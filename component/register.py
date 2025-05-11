@@ -22,7 +22,7 @@ class Register:
         cursor = conn.cursor()
         try:
             # 开始事务
-            conn.execute("BEGIN")
+            conn.execute("BEGIN EXCLUSIVE")
             now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute(
                 "INSERT INTO user (userId, addTime) VALUES (?, ?)",
@@ -42,37 +42,12 @@ class Register:
             conn.close()  # 确保连接被关闭
         logging.error(f"成功添加用户 {user_id}")   
         self.update_a_user(user_id)
-
-    def change_work_priority(self, video_number, priority=0):
-        conn = sqlite3.connect(db.db_path)
-        cursor = conn.cursor()
-        try:
-            # 开始事务
-            conn.execute("BEGIN")
-            cursor.execute(
-                "UPDATE works SET downloadPriority=? WHERE workNumber=?",
-                (priority, video_number)
-            )
-            # 提交事务
-            conn.commit()
-            logging.info(f"成功更新作品 {video_number} 的优先级为 {priority}")
-        except sqlite3.Error as e:
-            # 捕获数据库相关的异常
-            logging.info(f"更新作品优先级时发生错误: {e}")
-            conn.rollback()  # 回滚事务
-        except Exception as e:
-            # 捕获其他异常
-            logging.error(f"未知错误: {e}")
-            conn.rollback()  # 回滚事务
-        finally:
-            conn.close()  # 确保连接被关闭
-
     def add_work(self, work_number):
         conn = sqlite3.connect(os.path.join(conf.conf["data_path"], f"{conf.conf['db_name']}"))
         cursor = conn.cursor()
         try:
             # 开始事务
-            conn.execute("BEGIN")
+            conn.execute("BEGIN EXCLUSIVE")
             cursor.execute(
                 """
                 INSERT INTO works (upTime, workNumber, title, kind, state, downloadDate, downloadPriority)
@@ -94,6 +69,87 @@ class Register:
         finally:
             conn.close()  # 确保连接被关闭
         downloader.Downloader(work_number).something_to_download_event.set()  # 设置事件，表示有新任务可下载
+    
+    def remove_a_user(self, user_id):
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        try:
+            # 开始事务
+            conn.execute("BEGIN EXCLUSIVE")
+            now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute(
+                "DELETE FROM user WHERE userId=?",
+                (user_id,)
+            )
+            # 提交事务
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # 捕获用户已存在的异常
+            logging.warning("用户不存在，什么都不做")
+            conn.rollback()  # 回滚事务
+        except Exception as e:
+            # 捕获其他异常
+            logging.error(f"删除用户时发生错误: {e}")
+            conn.rollback()  # 回滚事务
+        finally:
+            conn.close()  # 确保连接被关闭
+        logging.error(f"成功添加用户 {user_id}")   
+        self.update_a_user(user_id)
+
+    def remove_work(self, work_number):
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        try:
+            # 开始事务
+            conn.execute("BEGIN EXCLUSIVE")
+            cursor.execute(
+                """
+                UPDATE works Set state='deleted' WHERE workNumber=?
+                """,
+                (work_number,)
+            )
+            # 提交事务
+            conn.commit()
+            logging.info(f"成功删除作品 {work_number}")
+        except sqlite3.IntegrityError:
+            # 捕获作品已存在的异常
+            logging.warning(f"作品 {work_number} 已经存在，什么都不做")
+            conn.rollback()  # 回滚事务
+        except Exception as e:
+            # 捕获其他异常
+            logging.error(f"添加作品时发生错误: {e}")
+            conn.rollback()  # 回滚事务
+        finally:
+            conn.close()  # 确保连接被关闭
+        downloader.Downloader(work_number).something_to_download_event.set()  # 设置事件，表示有新任务可下载
+    
+    
+    
+    def change_work_priority(self, video_number, priority=0):
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        try:
+            # 开始事务
+            conn.execute("BEGIN EXCLUSIVE")
+            cursor.execute(
+                "UPDATE works SET downloadPriority=? WHERE workNumber=?",
+                (priority, video_number)
+            )
+            # 提交事务
+            conn.commit()
+            logging.info(f"成功更新作品 {video_number} 的优先级为 {priority}")
+        except sqlite3.Error as e:
+            # 捕获数据库相关的异常
+            logging.info(f"更新作品优先级时发生错误: {e}")
+            conn.rollback()  # 回滚事务
+        except Exception as e:
+            # 捕获其他异常
+            logging.error(f"未知错误: {e}")
+            conn.rollback()  # 回滚事务
+        finally:
+            conn.close()  # 确保连接被关闭
+
+
 
     def update_a_user(self,user_id):
         count=0
@@ -106,7 +162,7 @@ class Register:
             try:
                 cursor = conn.cursor()
                 # 开启事务
-                conn.execute("BEGIN")
+                conn.execute("BEGIN EXCLUSIVE")
 
                 # 插入 works 表，主键冲突时跳过（使用 INSERT OR IGNORE）
                 cursor.execute(
@@ -137,4 +193,4 @@ class Register:
 
         conn.close()
         logging.info(f"更新用户 {user_id} 的作品成功,共更新 {count} 个作品")
-        downloader.Downloader(work_number).something_to_download_event.set()  # 设置事件，表示有新任务可下载
+        downloader.Downloader.something_to_download_event.set()  # 设置事件，表示有新任务可下载

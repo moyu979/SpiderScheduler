@@ -93,7 +93,7 @@ class Downloader:
         cursor = conn.cursor()
         try:
             # 开始事务
-            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("BEGIN EXCLUSIVE")
 
             # 查询 priority 最小的记录
             cursor.execute("""
@@ -136,7 +136,7 @@ class Downloader:
                 # 开启一个新的事务
                 conn = sqlite3.connect(db.db_path)
                 cursor = conn.cursor()
-                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("BEGIN EXCLUSIVE")
 
                 # 获取当前时间作为完成时间
                 finished_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -162,7 +162,7 @@ class Downloader:
                 # 开启一个新的事务
                 conn = sqlite3.connect(db.db_path)
                 cursor = conn.cursor()
-                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("BEGIN EXCLUSIVE")
 
                 # 获取当前时间作为完成时间
                 finished_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -191,7 +191,7 @@ class Downloader:
                 # 开启一个新的事务
                 conn = sqlite3.connect(db.db_path)
                 cursor = conn.cursor()
-                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("BEGIN EXCLUSIVE")
 
                 # 获取当前时间作为完成时间
                 finished_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -49,6 +49,7 @@ class Updater(ABC):
                 self.executor.submit(self.update_a_user,user[0])
 
             logging.info(f"第{self.update_count}次自动更新已完成")
+            
     def update_a_user(self,user_id):
         update_handle=self.update_one(user_id)
         conn=sqlite3.connect(db.db_path)
@@ -58,7 +59,7 @@ class Updater(ABC):
             try:
                 cursor = conn.cursor()
                 # 开启事务
-                conn.execute("BEGIN")
+                conn.execute("BEGIN EXCLUSIVE")
 
                 # 插入 works 表，主键冲突时跳过（使用 INSERT OR IGNORE）
                 cursor.execute(

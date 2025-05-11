@@ -7,8 +7,8 @@ message User {
   string userId=1;
 }
 
-message Video{
-  string VideoId=1;
+message Work{
+  string WorkId=1;
 }
 // 定义一个响应消息
 message Reply {
@@ -20,19 +20,25 @@ message NullMessage{
 }
 
 message SetPriorityMessage{
-  string VideoId=1;
+  string WorkId=1;
   string priority=2;
 }
 // 定义一个服务
 service Server {
   // 定义一个远程调用方法
-  rpc StartDownload (downloadRequest) returns (Reply);
+  rpc StartDownload (NullMessage) returns (Reply);
   rpc StopDownload(NullMessage) returns (Reply);
-  rpc DownloadUser(User) returns (Reply);
 
-  rpc SetPriority(SetPriorityMessage) returns (Reply);
   rpc AddUser (User) returns (Reply);
-  
+  rpc AddWork (Work) returns (Reply);
+  rpc RemoveUser (User) returns (Reply);
+  rpc RemoveWork (Work) returns (Reply);
+
+  rpc SetPriority (SetPriorityMessage) returns (Reply);
+
+  rpc GetDownloadNumber (NullMessage) returns (Reply);
+
+
   rpc ReloadConf(NullMessage) returns (Reply);
   rpc Test(NullMessage) returns (NullMessage);
 }

@@ -7,13 +7,13 @@ import component.assistant.data as conf
 
 class BrowserFactory:
     @classmethod
-    def get_browser(cls, headless=False,cookie=False):
+    def get_browser(cls, headless=False,cookie=False,force_no_cookie=False):
         if conf.get("browser") == "chrome":
-            return cls.get_chrome(headless,cookie)
+            return cls.get_chrome(headless,cookie,force_no_cookie)
         else:
             raise ValueError("Unsupported browser type")
     @classmethod 
-    def get_chrome(cls, headless=False,cookie=False):
+    def get_chrome(cls, headless=False,cookie=False,force_no_cookie=False):
         from selenium.webdriver.chrome.options import Options
         options=Options()
         options.add_argument('--ignore-certificate-errors')
@@ -30,7 +30,7 @@ class BrowserFactory:
         service = webdriver.ChromeService(executable_path=conf.get("browser_path"))
         driver = webdriver.Chrome(service=service,options=options)
         
-        if conf.get("use_cookie") or cookie:
+        if (conf.get("use_cookie") or cookie) and not force_no_cookie:
             driver.get(conf.get("domain"))
             with open(conf.get("cookie_path"), "rb") as file:
                 cookies = pickle.load(file)
@@ -38,7 +38,9 @@ class BrowserFactory:
                 driver.add_cookie(cookie)
             logging.info(f"成功加载cookie文件{conf.get('cookie_path')}")   
         return driver
-        
+    
+
+
     @classmethod
     def init_cookie(cls):
         if not os.path.exists(conf.get("cookie_path")):

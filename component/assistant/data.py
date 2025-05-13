@@ -13,7 +13,8 @@ class Config:
         "download_vip":False,#是否下载vip内容
         "data_path":os.path.abspath("./data"),#数据的存放位置
         "browser":"chrome",#使用的浏览器
-        "chrome_path":"/opt/homebrew/bin/chromedriver",#chrome的路径
+        #"chrome_path":"/opt/homebrew/bin/chromedriver",#chrome的路径
+        "chrome_path":"C:\Program Files\chromedriver\chromedriver.exe",#chrome的路径
         "use_cookie":True,#是否使用cookie
         "cookie_path":"./data/cookie.pkl",#使用的话cookie的位置
         "domain":"https://www.pixiv.net",

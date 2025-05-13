@@ -45,6 +45,7 @@ class Server(spider_pb2_grpc.ServerServicer):
         return answer    
 
     def AddUser(self, request, context):
+        logging.info(f"add {request.userId}")
         answer=spider_pb2.Reply(info=f"add {request.userId}")
         self.register.add_a_user(request.userId)
         return answer
@@ -88,12 +89,11 @@ def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
     spider_pb2_grpc.add_ServerServicer_to_server(Server(), server)
     server.add_insecure_port(f'[::]:{datas.get("port")}')  # 监听端口 50051
-    logging.info(f"Server started on port {datas.get("port")}...")
+    logging.info(f"Server started on port {datas.get('port')}...")
     server.start()
     while True:
         try:
             time.sleep(10)
-            print(123)
         except KeyboardInterrupt:
             logging.info("Stopping the server...")
             datas.to_json()

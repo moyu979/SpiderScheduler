@@ -42,8 +42,10 @@ class Updater(ABC):
             
             conn=sqlite3.connect(db.db_path)
             cursor=conn.cursor()
+            conn.execute("BEGIN EXCLUSIVE")
             users=cursor.execute("SELECT * FROM user").fetchall()
-
+            conn.commit()
+            conn.close()
             for user in users:
                 logging.info(f"{user[0]}正在更新")
                 self.executor.submit(self.update_a_user,user[0])

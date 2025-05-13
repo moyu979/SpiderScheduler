@@ -103,6 +103,7 @@ class Downloader(download_a_work.DownloadWork):
                     logging.info("下载成功")
 
         logging.info("下载成功")
+        self.driver.quit()
         return True
     def _get_user(self,data):
         conn=sqlite3.connect(db.db_path)

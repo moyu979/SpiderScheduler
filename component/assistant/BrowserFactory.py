@@ -19,7 +19,7 @@ class BrowserFactory:
                 proxy_ip = "127.0.0.1"
                 proxy_port = "7897"
                 options.add_argument('--proxy-server=http://{}:{}'.format(proxy_ip, proxy_port))
-            if conf.get("headless") and headless:
+            if conf.get("headless") or headless:
                 options.add_argument('--headless')
                 options.add_argument('--disable-gpu')
                 options.add_argument('--window-size=1920x1080')
@@ -29,7 +29,7 @@ class BrowserFactory:
             driver = webdriver.Chrome(service=service,options=options)
 
             
-            if conf.get("use_cookie") and cookie:
+            if conf.get("use_cookie") or cookie:
                 driver.get(conf.get("domain"))
                 with open(conf.get("cookie_path"), "rb") as file:
                     cookies = pickle.load(file)
@@ -45,7 +45,7 @@ class BrowserFactory:
     def init_cookie(cls):
         if not os.path.exists(conf.get("cookie_path")):
             driver = BrowserFactory.get_browser(cookie=False)
-            driver.get(conf.get("login_net"))
+            driver.get(conf.get("domain"))
             input("登录并按 Enter 键继续...")
             cookies = driver.get_cookies()
             with open(conf.get("cookie_path"), "wb") as file:

@@ -16,9 +16,9 @@ class Updater(update_a_user.UpdateUser):
         logging.info(f"get user {self.uid} page {self.page}")
         broswer = BrowserFactory.BrowserFactory.get_browser()
         if self.page == 1:
-            herf=f"https://www.pixiv.net/users/{user_id}/artworks"
+            herf=f"https://www.pixiv.net/users/{self.uid}/artworks"
         else:
-            herf=f"https://www.pixiv.net/users/{user_id}/artworks?p={self.page}"
+            herf=f"https://www.pixiv.net/users/{self.uid}/artworks?p={self.page}"
         broswer.get(herf)
         html_content = broswer.page_source
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -28,6 +28,7 @@ class Updater(update_a_user.UpdateUser):
             title=pic.text
             a_pic=(0, workNumber, title, "normal", "inQueue", "0", "0")
             self.works.append(a_pic)
+        broswer.quit()
 
 
 if __name__ == "__main__":

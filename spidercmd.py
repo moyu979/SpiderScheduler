@@ -17,7 +17,6 @@ class MyCmd(cmd.Cmd):
         self.conf={
             "port":50051
         }
-        self.do_loadConf()
 
         self.channal=f'localhost:{self.conf["port"]}'
         

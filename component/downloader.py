@@ -69,12 +69,11 @@ class Downloader:
     def start(self) -> None:
         """启动下载器"""
         while True:
-            print(12345)
             # 等待 start_event 被触发
-            if not self.start_event.wait(timeout=1):  # 每秒检查一次
+            if not self.start_event.wait(timeout=10):  # 每秒检查一次
                 continue  # 如果事件未触发，继续等待
 
-            if not self.something_to_download_event.wait(timeout=1):  # 每秒检查一次
+            if not self.something_to_download_event.wait(timeout=10):  # 每秒检查一次
                 continue  # 如果事件未触发，继续等待
 
             with self._lock:
@@ -83,12 +82,10 @@ class Downloader:
                     self._already_downloaded=0
                     logging.info("已下载指定数量的作品，停止下载器")
                     continue
-            print(123456)
             # 提交任务到线程池
             self.executor.submit(self.download_one)
 
     def download_one(self):
-        print(111)
         conn=sqlite3.connect(db.db_path)
         cursor = conn.cursor()
         try:

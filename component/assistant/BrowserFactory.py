@@ -44,7 +44,7 @@ class BrowserFactory:
     @classmethod
     def init_cookie(cls):
         if not os.path.exists(conf.get("cookie_path")):
-            driver = BrowserFactory.get_browser(cookie=False)
+            driver = BrowserFactory.get_browser(force_no_cookie=True)
             driver.get(conf.get("domain"))
             input("登录并按 Enter 键继续...")
             cookies = driver.get_cookies()

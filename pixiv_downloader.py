@@ -1,3 +1,4 @@
+from time import sleep
 import component.template.download_a_work as download_a_work
 import component.assistant.BrowserFactory as BrowserFactory
 from component.assistant.database import Database as db
@@ -50,8 +51,9 @@ class Downloader(download_a_work.DownloadWork):
         work_save_path=os.path.join(total_save_path,f"{work_id}")
         if not os.path.exists(work_save_path):
             os.mkdir(work_save_path)
-        self.driver=BrowserFactory.BrowserFactory.get_browser(headless=True)
+        self.driver=BrowserFactory.BrowserFactory.get_browser(headless=False)
         self.driver.get(f"https://www.pixiv.net/artworks/{work_id}")
+        #sleep(3)
         html_content = self.driver.page_source
         
         with open(os.path.join(work_save_path,"page.html"),"w",encoding='utf-8') as f:

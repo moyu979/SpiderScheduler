@@ -35,12 +35,12 @@ class Server(spider_pb2_grpc.ServerServicer):
         logging.info(f"init finish")
 
     def StartDownload(self, request, context):
-        answer=spider_pb2.Reply(info=f"download {request.downloadNumber} videos start")
+        answer=spider_pb2.Reply(info=f"download works start")
         self.downloader.start_event.set()
         return answer
     
     def StopDownload(self, request, context):
-        answer=spider_pb2.Reply(info=f"stop {request.downloadNumber} videos start")
+        answer=spider_pb2.Reply(info=f"stop download works start")
         self.downloader.start_event.clear()
         return answer    
 
@@ -55,7 +55,7 @@ class Server(spider_pb2_grpc.ServerServicer):
         return answer
     
     def RemoveUser(self, request, context):
-        answer=spider_pb2.Reply(info=f"tremove {request.userId}")
+        answer=spider_pb2.Reply(info=f"remove {request.userId}")
         self.register.remove_user(request.userId)
         return answer
     
@@ -66,7 +66,7 @@ class Server(spider_pb2_grpc.ServerServicer):
     
     def SetPriority(self, request, context):
         answer=spider_pb2.Reply(info=f"set {request.WorkId} priority to {request.priority}")
-        self.register.set_priority(request.WorkId,request.priority)
+        self.register.change_work_priority(request.WorkId,request.priority)
         return answer
 
 

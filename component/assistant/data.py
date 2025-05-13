@@ -5,6 +5,8 @@ import json
 
 class Config:
     conf={
+        "auto_download":False,#用户id
+
         "auto_check":True,#是否启用每天的自动检查更新
         "update_interval":86400,#检查更新的频率
 

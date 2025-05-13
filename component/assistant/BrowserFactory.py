@@ -16,7 +16,9 @@ class BrowserFactory:
     def get_chrome(cls, headless=False,cookie=False,force_no_cookie=False):
         from selenium.webdriver.chrome.options import Options
         options=Options()
-        options.add_argument('--ignore-certificate-errors')
+        options.add_argument('--ignore-certificate-errors')# 忽略证书错误
+        options.add_argument('--ignore-ssl-errors')          # 忽略 SSL 错误（可选）
+        options.add_argument('--disable-web-security')       # 关闭网络安全策略（仅调试使用）
         options.add_argument('--no-sandbox')
         if conf.get("use_proxy"):
             logging.info("setting proxy")
@@ -36,7 +38,7 @@ class BrowserFactory:
                 cookies = pickle.load(file)
             for cookie in cookies:
                 driver.add_cookie(cookie)
-            logging.info(f"成功加载cookie文件{conf.get('cookie_path')}")   
+            logging.debug(f"成功加载cookie文件{conf.get('cookie_path')}")   
         return driver
     
 
@@ -50,7 +52,7 @@ class BrowserFactory:
             cookies = driver.get_cookies()
             with open(conf.get("cookie_path"), "wb") as file:
                 pickle.dump(cookies, file)
-                logging.info(f"已经将cookie写入到 {conf.get('cookie_path')}")
+                logging.debug(f"已经将cookie写入到 {conf.get('cookie_path')}")
             driver.quit()
         else:
             logging.info(f"cookie文件{conf.get('cookie_path')}已经存在，跳过登录")

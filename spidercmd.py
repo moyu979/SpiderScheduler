@@ -59,17 +59,19 @@ class MyCmd(cmd.Cmd):
             response = stub.RemoveWork(spider_pb2.Work(workId=workId))
             print(response.info)
 
-    def do_SetPriority(self, bv):
+    def do_SetPriority(self, line):
         """将某个bv设置为优先下载"""
+        print(line)
+        bv,pri=line.split(" ")
         with grpc.insecure_channel(self.channal) as channel:
             stub = spider_pb2_grpc.ServerStub(channel)
-            response = stub.SetPriority(spider_pb2.Video(VideoId=bv))
+            response = stub.SetPriority(spider_pb2.SetPriorityMessage(WorkId=bv,priority=pri))
             print(response.info)
     def do_GetDownloadNumber(self, line):
         """将某个bv设置为优先下载"""
         with grpc.insecure_channel(self.channal) as channel:
             stub = spider_pb2_grpc.ServerStub(channel)
-            response = stub.SetPriority(spider_pb2.NullMessage())
+            response = stub.GetDownloadNumber(spider_pb2.NullMessage())
             print(response.info)
 
     def do_test(self,line):

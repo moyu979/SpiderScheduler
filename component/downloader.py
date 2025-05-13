@@ -1,5 +1,6 @@
 #用来下载的
 from abc import ABC, abstractmethod
+import time
 from component.assistant.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor as ThreadPoolExecutor
 import datetime
 from time import sleep
@@ -15,7 +16,9 @@ import component.assistant.data as conf
 
 class Downloader:
     start_event = threading.Event()
-    start_event.set()
+    if conf.get("auto_download"):
+
+        start_event.set()
 
     something_to_download_event = threading.Event()
     something_to_download_event.set()  # 设置事件，表示有东西可以下载
@@ -115,7 +118,7 @@ class Downloader:
             else:
                 Downloader.something_to_download_event.clear()  # 设置事件，表示没有更多任务
                 logging.info("No records found with state 'inQueue'.")
-                sleep(10)
+                #sleep(10)
 
         except sqlite3.Error as e:
             print(f"SQLite error: {e}")
@@ -210,3 +213,4 @@ class Downloader:
 
         with self._lock:
             self._thread_count -= 1
+        time.sleep(conf.get("sleep_second"))

@@ -70,7 +70,7 @@ class Register:
             conn.close()  # 确保连接被关闭
         downloader.Downloader(work_number).something_to_download_event.set()  # 设置事件，表示有新任务可下载
     
-    def remove_a_user(self, user_id):
+    def remove_user(self, user_id):
         conn = sqlite3.connect(db.db_path)
         cursor = conn.cursor()
         try:
@@ -93,8 +93,6 @@ class Register:
             conn.rollback()  # 回滚事务
         finally:
             conn.close()  # 确保连接被关闭
-        logging.error(f"成功添加用户 {user_id}")   
-        self.update_a_user(user_id)
 
     def remove_work(self, work_number):
         conn = sqlite3.connect(db.db_path)

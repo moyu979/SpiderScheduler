@@ -15,7 +15,8 @@ class Updater(ABC):
     def __init__(self,update_one_item):
         self.update_one=update_one_item
         self.auto_update=threading.Event()
-        self.auto_update.set()
+        if conf.get("auto_update"):
+            self.auto_update.set()
         self.executor = ThreadPoolExecutor(max_workers=conf.get("update_thread"))
         self.update_count=0
 

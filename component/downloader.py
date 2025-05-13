@@ -1,115 +1,212 @@
+#用来下载的
+from abc import ABC, abstractmethod
+from component.assistant.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor as ThreadPoolExecutor
+import datetime
+from time import sleep
+from typing import Any
+import threading
 import sqlite3
 import os
-
-import subprocess
-import random
-
-import requests
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from bs4 import BeautifulSoup
-import pickle
 import logging
-from time import sleep
 
-
-from component.tools import timeControl
-from component import datas
-from component.Browser.chrome import Browser
+import component.template as template
+from component.assistant.database import Database as db
+import component.assistant.data as conf
 
 class Downloader:
-    def __init__(self):
-        self.continue_download=True
-        self.working=False
-        self.driver=Browser().get_driver()
+    start_event = threading.Event()
+    start_event.set()
 
-    def download_all(self):
-        self.working=True
-        while self.continue_download:
-            if not self.downloadOne():
-                logging.info("都下完啦")
-                break
-        logging.info(f"Stoped by cmd")
-        self.working=False
+    something_to_download_event = threading.Event()
+    something_to_download_event.set()  # 设置事件，表示有东西可以下载
 
-    def download_some(self,download_number=2):
-        self.working=True
-        for i in range(0,download_number):
-            logging.info(f"download {i}th video")
-            self.downloadOne()
-            if not self.continue_download:
-                logging.info(f"Stoped by cmd")
-                break
-        self.working=False
+    def __init__(self,downloader):
+        self.downloader=downloader
 
-    def download_user(self,user_id):
-        self.working=True
-        conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
-        cursor = conn.cursor()
-        works=cursor.execute("SELECT * FROM upload WHERE userId=? and state=?",(user_id,"inQueue")).fetchall()
-        conn.close()
+        self._lock = threading.Lock()
 
-        logging.info(f"需要下载这个用户的 {len(works)} 段作品")
-        for work in works:
-            if not self.continue_download:
-                logging.info(f"Stoped by cmd")
-                break
-            self._download(work)
-        self.working=False
+        self.executor = ThreadPoolExecutor(max_workers=conf.get("download_thread"))
+        
+        self._already_downloaded = 0
+        
+        threading.Thread(target=self.start).start()
+        logging.info("Downloader initialized")
 
-    def download_wanted(self,work_id):
-        self.working=True
-        conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
-        cursor = conn.cursor()
-        data=cursor.execute("SELECT * FROM works WHERE workNumber=?",(work_id,)).fetchall()
-        conn.close()
-        if len(data)==0:
-            work_name,work_kind=self.get_info_by_id(work_id)
-            conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO works (workNumber,title,kind,state) VALUES (?,?,?,?)",(work_id,work_name,work_kind,"inQueue")).fetchall()
-            data=cursor.execute("SELECT * FROM works WHERE workNumber=?",(work_id,)).fetchall()
-            conn.commit()
-            conn.close()
-        data=data[0]
-        print(data)
-        if self._download(data):
-            conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
-            cursor = conn.cursor()
-            cursor.execute("update works set state='finished' where workNumber=?",(data[1],))
-            cursor.execute("update works set downloadDate=? where workNumber=?",(timeControl.now_time(),data[1]))
-            conn.commit()
-            conn.close()
-        self.working=False
+    def stop_down(self):
+        """停止下载器"""
+        logging.info("Stopping the downloader...")
+        self.start_event.clear()  # 重置 start_event，停止下载器
+    def start_down(self):
+        """启动下载器"""
+        logging.info("Starting the downloader...")
+        self.start_event.set()  # 设置 start_event，启动下载器
+    def add_sth(self):
+        """设置 something_to_download_event 为触发状态"""
+        logging.info("Setting something_to_download_event to triggered.")
+        self.something_to_download_event.set()
 
-    def get_info_by_id(self,video_id):
-        """
-        这个方法主要完成以下功能：
-        给定的视频号，获得视频标题和类型,可以不写
-        """
-        return "",""
+    def adjust_thread_pool(self, new_max_threads):
+        """动态调整线程池大小，迁移未完成任务"""
+        if new_max_threads != self.max_threads:
+            logging.info(f"Adjusting thread pool size from {self.max_threads} to {new_max_threads}")
+            self.max_threads = new_max_threads
     
-    def downloadOne(self):
-        for i in datas.conf["download_priority"]:
-            conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
-            cursor = conn.cursor()
-            one_data=cursor.execute("SELECT * FROM works WHERE state=? and downloadPriority=?",("inQueue",i)).fetchone()
-            cursor.close()
-            conn.commit()
-            conn.close()
-            if one_data is None:
-                continue
+            # 获取旧线程池中的未完成任务
+            pending_tasks = []
+            for task in self.executor._work_queue.queue:
+                pending_tasks.append(task)
+    
+            # 关闭旧线程池
+            self.executor.shutdown(wait=True)
+    
+            # 创建新的线程池
+            self.executor = ThreadPoolExecutor(max_workers=self.max_threads)
+    
+            # 将未完成任务提交到新线程池
+            for task in pending_tasks:
+                self.executor.submit(task)
+
+    def start(self) -> None:
+        """启动下载器"""
+        while True:
+            # 等待 start_event 被触发
+            if not self.start_event.wait(timeout=10):  # 每秒检查一次
+                continue  # 如果事件未触发，继续等待
+
+            if not self.something_to_download_event.wait(timeout=10):  # 每秒检查一次
+                continue  # 如果事件未触发，继续等待
+
+            with self._lock:
+                if conf.get("once_download")>0 and self._already_downloaded >= conf.get("once_download"):
+                    self.start_event.clear()  # 重置 start_event，停止下载器
+                    self._already_downloaded=0
+                    logging.info("已下载指定数量的作品，停止下载器")
+                    continue
+            # 提交任务到线程池
+            self.executor.submit(self.download_one)
+
+    def download_one(self):
+        conn=sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        try:
+            # 开始事务
+            conn.execute("BEGIN EXCLUSIVE")
+
+            # 查询 priority 最小的记录
+            cursor.execute("""
+                SELECT workNumber, downloadPriority, state
+                FROM works
+                WHERE state = 'inQueue'
+                ORDER BY downloadPriority ASC
+                LIMIT 1;
+            """)
+            row = cursor.fetchone()
+
+            if row:
+                record_id = row[0]
+                # 更新记录状态为 'downloading'
+                cursor.execute("""
+                    UPDATE works
+                    SET state = 'downloading'
+                    WHERE workNumber = ?;
+                """, (record_id,))
+                conn.commit()
+                logging.debug(f"Record {record_id} is now downloading.")
             else:
-                if self._download(one_data):
-                    conn=sqlite3.connect(os.path.join(datas.conf["data_path"],f"{datas.conf["db_name"]}"))
-                    cursor = conn.cursor()
-                    cursor.execute("update works set state='finished' where workNumber=?",(one_data[1],))
-                    cursor.execute("update works set downloadDate=? where workNumber=?",(timeControl.now_time(),one_data[1]))
-                    conn.commit()
-                    conn.close()
-                return True
-            
-        return False
-    
-    def _download(self,data):
-        logging.info("这个是需要你完成的！请完成获取用户的投稿并且写到数据库的功能")
+                Downloader.something_to_download_event.clear()  # 设置事件，表示没有更多任务
+                logging.info("No records found with state 'inQueue'.")
+                sleep(10)
+
+        except sqlite3.Error as e:
+            print(f"SQLite error: {e}")
+            conn.rollback()
+        finally:
+            cursor.close()
+            conn.close()
+
+        # 下载
+        down=self.downloader(record_id)
+        result=down.download_it()
+        # 处理下载结果
+        if result=="success":#success
+            try:
+                # 开启一个新的事务
+                conn = sqlite3.connect(db.db_path)
+                cursor = conn.cursor()
+                conn.execute("BEGIN EXCLUSIVE")
+
+                # 获取当前时间作为完成时间
+                finished_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # 更新数据库，将 state 设置为 'finished'，并记录完成时间
+                cursor.execute("""
+                    UPDATE works
+                    SET state = 'finished', downloadDate = ?
+                    WHERE workNumber = ?;
+                """, (finished_time, record_id))
+                conn.commit()
+                logging.info(f"Record {record_id} marked as finished at {finished_time}.")
+            except sqlite3.Error as e:
+                logging.error(f"Failed to update record {record_id} to finished: {e}")
+                conn.rollback()
+            finally:
+                cursor.close()
+                conn.close()
+            with self._lock:
+                self._already_downloaded += 1
+        elif result=="failed":
+            try:
+                # 开启一个新的事务
+                conn = sqlite3.connect(db.db_path)
+                cursor = conn.cursor()
+                conn.execute("BEGIN EXCLUSIVE")
+
+                # 获取当前时间作为完成时间
+                finished_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # 更新数据库，将 state 设置为 'finished'，并记录完成时间
+                cursor.execute("""
+                    UPDATE works
+                    SET state = 'failed'
+                    WHERE workNumber = ?;
+                """, (record_id))
+                conn.commit()
+                logging.info(f"Record {record_id} marked as failed at {finished_time}.")
+            except sqlite3.Error as e:
+                logging.error(f"Failed to update record {record_id} to finished: {e}")
+                conn.rollback()
+            finally:
+                cursor.close()
+                conn.close()
+
+        elif result=="skip":
+            pass
+            #更新数据库
+
+        else:
+            try:
+                # 开启一个新的事务
+                conn = sqlite3.connect(db.db_path)
+                cursor = conn.cursor()
+                conn.execute("BEGIN EXCLUSIVE")
+
+                # 获取当前时间作为完成时间
+                finished_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # 更新数据库，将 state 设置为 'finished'，并记录完成时间
+                cursor.execute("""
+                    UPDATE works
+                    SET state = 'failed'
+                    WHERE workNumber = ?;
+                """, (record_id))
+                conn.commit()
+                logging.info(f"Record {record_id} marked as failed at {finished_time}.")
+            except sqlite3.Error as e:
+                logging.error(f"Failed to update record {record_id} to finished: {e}")
+                conn.rollback()
+            finally:
+                cursor.close()
+                conn.close()
+
+        with self._lock:
+            self._thread_count -= 1

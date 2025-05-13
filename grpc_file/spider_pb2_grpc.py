@@ -5,7 +5,7 @@ import warnings
 
 import spider_pb2 as spider__pb2
 
-GRPC_GENERATED_VERSION = '1.70.0'
+GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -37,7 +37,7 @@ class ServerStub(object):
         """
         self.StartDownload = channel.unary_unary(
                 '/Server/StartDownload',
-                request_serializer=spider__pb2.downloadRequest.SerializeToString,
+                request_serializer=spider__pb2.NullMessage.SerializeToString,
                 response_deserializer=spider__pb2.Reply.FromString,
                 _registered_method=True)
         self.StopDownload = channel.unary_unary(
@@ -45,9 +45,24 @@ class ServerStub(object):
                 request_serializer=spider__pb2.NullMessage.SerializeToString,
                 response_deserializer=spider__pb2.Reply.FromString,
                 _registered_method=True)
-        self.DownloadUser = channel.unary_unary(
-                '/Server/DownloadUser',
+        self.AddUser = channel.unary_unary(
+                '/Server/AddUser',
                 request_serializer=spider__pb2.User.SerializeToString,
+                response_deserializer=spider__pb2.Reply.FromString,
+                _registered_method=True)
+        self.AddWork = channel.unary_unary(
+                '/Server/AddWork',
+                request_serializer=spider__pb2.Work.SerializeToString,
+                response_deserializer=spider__pb2.Reply.FromString,
+                _registered_method=True)
+        self.RemoveUser = channel.unary_unary(
+                '/Server/RemoveUser',
+                request_serializer=spider__pb2.User.SerializeToString,
+                response_deserializer=spider__pb2.Reply.FromString,
+                _registered_method=True)
+        self.RemoveWork = channel.unary_unary(
+                '/Server/RemoveWork',
+                request_serializer=spider__pb2.Work.SerializeToString,
                 response_deserializer=spider__pb2.Reply.FromString,
                 _registered_method=True)
         self.SetPriority = channel.unary_unary(
@@ -55,9 +70,9 @@ class ServerStub(object):
                 request_serializer=spider__pb2.SetPriorityMessage.SerializeToString,
                 response_deserializer=spider__pb2.Reply.FromString,
                 _registered_method=True)
-        self.AddUser = channel.unary_unary(
-                '/Server/AddUser',
-                request_serializer=spider__pb2.User.SerializeToString,
+        self.GetDownloadNumber = channel.unary_unary(
+                '/Server/GetDownloadNumber',
+                request_serializer=spider__pb2.NullMessage.SerializeToString,
                 response_deserializer=spider__pb2.Reply.FromString,
                 _registered_method=True)
         self.ReloadConf = channel.unary_unary(
@@ -89,7 +104,25 @@ class ServerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DownloadUser(self, request, context):
+    def AddUser(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AddWork(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RemoveUser(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RemoveWork(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -101,7 +134,7 @@ class ServerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def AddUser(self, request, context):
+    def GetDownloadNumber(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -124,7 +157,7 @@ def add_ServerServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'StartDownload': grpc.unary_unary_rpc_method_handler(
                     servicer.StartDownload,
-                    request_deserializer=spider__pb2.downloadRequest.FromString,
+                    request_deserializer=spider__pb2.NullMessage.FromString,
                     response_serializer=spider__pb2.Reply.SerializeToString,
             ),
             'StopDownload': grpc.unary_unary_rpc_method_handler(
@@ -132,9 +165,24 @@ def add_ServerServicer_to_server(servicer, server):
                     request_deserializer=spider__pb2.NullMessage.FromString,
                     response_serializer=spider__pb2.Reply.SerializeToString,
             ),
-            'DownloadUser': grpc.unary_unary_rpc_method_handler(
-                    servicer.DownloadUser,
+            'AddUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.AddUser,
                     request_deserializer=spider__pb2.User.FromString,
+                    response_serializer=spider__pb2.Reply.SerializeToString,
+            ),
+            'AddWork': grpc.unary_unary_rpc_method_handler(
+                    servicer.AddWork,
+                    request_deserializer=spider__pb2.Work.FromString,
+                    response_serializer=spider__pb2.Reply.SerializeToString,
+            ),
+            'RemoveUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.RemoveUser,
+                    request_deserializer=spider__pb2.User.FromString,
+                    response_serializer=spider__pb2.Reply.SerializeToString,
+            ),
+            'RemoveWork': grpc.unary_unary_rpc_method_handler(
+                    servicer.RemoveWork,
+                    request_deserializer=spider__pb2.Work.FromString,
                     response_serializer=spider__pb2.Reply.SerializeToString,
             ),
             'SetPriority': grpc.unary_unary_rpc_method_handler(
@@ -142,9 +190,9 @@ def add_ServerServicer_to_server(servicer, server):
                     request_deserializer=spider__pb2.SetPriorityMessage.FromString,
                     response_serializer=spider__pb2.Reply.SerializeToString,
             ),
-            'AddUser': grpc.unary_unary_rpc_method_handler(
-                    servicer.AddUser,
-                    request_deserializer=spider__pb2.User.FromString,
+            'GetDownloadNumber': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetDownloadNumber,
+                    request_deserializer=spider__pb2.NullMessage.FromString,
                     response_serializer=spider__pb2.Reply.SerializeToString,
             ),
             'ReloadConf': grpc.unary_unary_rpc_method_handler(
@@ -184,7 +232,7 @@ class Server(object):
             request,
             target,
             '/Server/StartDownload',
-            spider__pb2.downloadRequest.SerializeToString,
+            spider__pb2.NullMessage.SerializeToString,
             spider__pb2.Reply.FromString,
             options,
             channel_credentials,
@@ -224,7 +272,7 @@ class Server(object):
             _registered_method=True)
 
     @staticmethod
-    def DownloadUser(request,
+    def AddUser(request,
             target,
             options=(),
             channel_credentials=None,
@@ -237,8 +285,89 @@ class Server(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/Server/DownloadUser',
+            '/Server/AddUser',
             spider__pb2.User.SerializeToString,
+            spider__pb2.Reply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AddWork(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/Server/AddWork',
+            spider__pb2.Work.SerializeToString,
+            spider__pb2.Reply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RemoveUser(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/Server/RemoveUser',
+            spider__pb2.User.SerializeToString,
+            spider__pb2.Reply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RemoveWork(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/Server/RemoveWork',
+            spider__pb2.Work.SerializeToString,
             spider__pb2.Reply.FromString,
             options,
             channel_credentials,
@@ -278,7 +407,7 @@ class Server(object):
             _registered_method=True)
 
     @staticmethod
-    def AddUser(request,
+    def GetDownloadNumber(request,
             target,
             options=(),
             channel_credentials=None,
@@ -291,8 +420,8 @@ class Server(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/Server/AddUser',
-            spider__pb2.User.SerializeToString,
+            '/Server/GetDownloadNumber',
+            spider__pb2.NullMessage.SerializeToString,
             spider__pb2.Reply.FromString,
             options,
             channel_credentials,

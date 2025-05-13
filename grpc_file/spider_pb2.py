@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0cspider.proto\")\n\x0f\x64ownloadRequest\x12\x16\n\x0e\x64ownloadNumber\x18\x01 \x01(\x05\"\x16\n\x04User\x12\x0e\n\x06userId\x18\x01 \x01(\t\"\x18\n\x05Video\x12\x0f\n\x07VideoId\x18\x01 \x01(\t\"\x15\n\x05Reply\x12\x0c\n\x04info\x18\x01 \x01(\t\"\r\n\x0bNullMessage\"7\n\x12SetPriorityMessage\x12\x0f\n\x07VideoId\x18\x01 \x01(\t\x12\x10\n\x08priority\x18\x02 \x01(\t2\x86\x02\n\x06Server\x12)\n\rStartDownload\x12\x10.downloadRequest\x1a\x06.Reply\x12$\n\x0cStopDownload\x12\x0c.NullMessage\x1a\x06.Reply\x12\x1d\n\x0c\x44ownloadUser\x12\x05.User\x1a\x06.Reply\x12*\n\x0bSetPriority\x12\x13.SetPriorityMessage\x1a\x06.Reply\x12\x18\n\x07\x41\x64\x64User\x12\x05.User\x1a\x06.Reply\x12\"\n\nReloadConf\x12\x0c.NullMessage\x1a\x06.Reply\x12\"\n\x04Test\x12\x0c.NullMessage\x1a\x0c.NullMessageb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0cspider.proto\")\n\x0f\x64ownloadRequest\x12\x16\n\x0e\x64ownloadNumber\x18\x01 \x01(\x05\"\x16\n\x04User\x12\x0e\n\x06userId\x18\x01 \x01(\t\"\x16\n\x04Work\x12\x0e\n\x06workId\x18\x01 \x01(\t\"\x15\n\x05Reply\x12\x0c\n\x04info\x18\x01 \x01(\t\"\r\n\x0bNullMessage\"6\n\x12SetPriorityMessage\x12\x0e\n\x06WorkId\x18\x01 \x01(\t\x12\x10\n\x08priority\x18\x02 \x01(\t2\xe2\x02\n\x06Server\x12%\n\rStartDownload\x12\x0c.NullMessage\x1a\x06.Reply\x12$\n\x0cStopDownload\x12\x0c.NullMessage\x1a\x06.Reply\x12\x18\n\x07\x41\x64\x64User\x12\x05.User\x1a\x06.Reply\x12\x18\n\x07\x41\x64\x64Work\x12\x05.Work\x1a\x06.Reply\x12\x1b\n\nRemoveUser\x12\x05.User\x1a\x06.Reply\x12\x1b\n\nRemoveWork\x12\x05.Work\x1a\x06.Reply\x12*\n\x0bSetPriority\x12\x13.SetPriorityMessage\x1a\x06.Reply\x12)\n\x11GetDownloadNumber\x12\x0c.NullMessage\x1a\x06.Reply\x12\"\n\nReloadConf\x12\x0c.NullMessage\x1a\x06.Reply\x12\"\n\x04Test\x12\x0c.NullMessage\x1a\x0c.NullMessageb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,14 +35,14 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_DOWNLOADREQUEST']._serialized_end=57
   _globals['_USER']._serialized_start=59
   _globals['_USER']._serialized_end=81
-  _globals['_VIDEO']._serialized_start=83
-  _globals['_VIDEO']._serialized_end=107
-  _globals['_REPLY']._serialized_start=109
-  _globals['_REPLY']._serialized_end=130
-  _globals['_NULLMESSAGE']._serialized_start=132
-  _globals['_NULLMESSAGE']._serialized_end=145
-  _globals['_SETPRIORITYMESSAGE']._serialized_start=147
-  _globals['_SETPRIORITYMESSAGE']._serialized_end=202
-  _globals['_SERVER']._serialized_start=205
-  _globals['_SERVER']._serialized_end=467
+  _globals['_WORK']._serialized_start=83
+  _globals['_WORK']._serialized_end=105
+  _globals['_REPLY']._serialized_start=107
+  _globals['_REPLY']._serialized_end=128
+  _globals['_NULLMESSAGE']._serialized_start=130
+  _globals['_NULLMESSAGE']._serialized_end=143
+  _globals['_SETPRIORITYMESSAGE']._serialized_start=145
+  _globals['_SETPRIORITYMESSAGE']._serialized_end=199
+  _globals['_SERVER']._serialized_start=202
+  _globals['_SERVER']._serialized_end=556
 # @@protoc_insertion_point(module_scope)

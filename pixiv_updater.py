@@ -36,10 +36,3 @@ if __name__ == "__main__":
     user_id = 123456  # Replace with the actual user ID you want to update
     BrowserFactory.BrowserFactory.init_cookie()
     reg.add_a_user(123456)
-    # Start the update process
-    # count=10
-    # for work in updater:
-    #     print(work)  # Process each work item as needed
-    #     count-=1
-    #     if count<0:
-    #         break

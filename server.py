@@ -76,7 +76,6 @@ class Server(spider_pb2_grpc.ServerServicer):
     
     def Test(self, request, context):
         threading.Thread(target=self.controller.test()).start()
-
         answer=spider_pb2.NullMessage()
         return answer
 

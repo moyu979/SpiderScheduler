@@ -1,7 +1,42 @@
-**/__pycache__
-
 data
 testFile
 testCode
 
+# 忽略根目录下的docker文件夹（用于存储docker数据的）
+docker/
+
+# 忽略行数统计文件
 .VSCodeCounter
+
+# 忽略所有层级的__pycache__目录
+__pycache__/
+**/__pycache__/
+
+# 忽略Python编译文件
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# 忽略IDE和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 忽略日志文件
+*.log
+
+# 忽略数据库文件
+*.db
+*.sqlite3
+
+# 忽略环境变量文件
+.env
+.env.local
+.env.*.local
+
+# 忽略操作系统生成的文件
+.DS_Store
+Thumbs.db

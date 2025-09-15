@@ -9,11 +9,6 @@ CREATE TABLE works(
     UNIQUE (workNumber)
 );
 
-CREATE TABLE STREAM(
-    userId TEXT,
-    time TEXT,
-    title TEXT
-);
 
 CREATE TABLE upload(
     userId TEXT not NULL,
@@ -23,6 +18,5 @@ CREATE TABLE upload(
 
 CREATE TABLE user(
     userId TEXT UNIQUE,
-    addTime TEXT,
-    recodeStream TEXT DEFAULT 'FALSE'
+    addTime TEXT
 );

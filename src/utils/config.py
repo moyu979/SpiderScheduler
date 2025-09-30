@@ -103,7 +103,8 @@ class ConfigDaemon:
                 logger.debug("守护线程重载配置完成")
             except Exception as e:
                 logger.error(f"守护线程加载配置失败: {e}")
-            time.sleep(global_conf['conf_reload_interval'])  # 定期执行
+            interval = global_conf.get('conf_reload_interval', 300)
+            time.sleep(interval)  # 定期执行
 
 
 class ConfigManager:
@@ -129,10 +130,8 @@ class ConfigManager:
             'global_conf': global_conf,
         }
         
-        # 设置配置目录
-        self.config_dir = path['config_path']
-        
-        # 创建配置目录
+        # 固定配置目录为 docker/confs（仅从文件加载，不创建默认值文件）
+        self.config_dir = os.path.join('docker', 'confs')
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir, exist_ok=True)
             try:
@@ -145,11 +144,11 @@ class ConfigManager:
         self.reader = ConfigReader(self.config_dir)
         self.writer = ConfigWriter(self.config_dir)
         
-        # 创建必要的目录
-        self._create_necessary_directories()
+        # 仅加载配置文件（不创建默认值）
+        config_files_exist = self._load_configs()
         
-        # 加载或创建配置文件
-        config_files_exist = self._load_or_create_configs()
+        # 加载完成后再创建必要目录
+        self._create_necessary_directories()
         
         # 设置系统运行状态
         self._set_system_status(config_files_exist)
@@ -183,17 +182,19 @@ class ConfigManager:
                     except Exception as e:
                         logger.warning(f"创建目录 {folder_path} 失败: {e}")
     
-    def _load_or_create_configs(self):
-        """加载或创建配置文件"""
+    def _load_configs(self):
+        """仅加载配置文件（不创建默认值），若缺失返回 False"""
+        all_ok = True
         for dict_name, config_dict in self.config_dicts.items():
             config_file_path = os.path.join(self.config_dir, f"{dict_name}.json")
             if not os.path.exists(config_file_path):
-                logger.warning(f"缺少配置文件: {config_file_path}，使用默认值创建")
-                # 写入默认配置
-                self.writer.save_config(config_dict, dict_name)
-            # 加载（无论是新建的还是已存在的）
-            self.reader.load_config(config_dict, dict_name)
-        return True
+                logger.error(f"缺少配置文件: {config_file_path}")
+                all_ok = False
+                continue
+            loaded = self.reader.load_config(config_dict, dict_name)
+            if not loaded:
+                all_ok = False
+        return all_ok
     
     def _set_system_status(self, config_files_exist):
         """设置系统运行状态"""
@@ -220,7 +221,7 @@ class ConfigManager:
         except:
             pass
         
-        self._load_or_create_configs()
+        self._load_configs()
         
         try:
             from .logger import logger
@@ -232,52 +233,12 @@ class ConfigManager:
 # 全局配置实例
 config_manager = ConfigManager()
 
-global_conf={
-    "run":False,
-    "conf_reload_interval":300,
-}
-
-path={
-    "db_file": "docker/spider.db", #数据库路径
-    "config_path": "docker/config",#配置文件路径
-    "log_path": "docker/logs",#日志路径
-    "download_path": "docker/download",#下载路径
-    "download_cache_path": "docker/download_cache",#下载缓存路径
-}
-
-download_setting={
-    "download_thread":1,    #下载线程数
-    "once_download":-1,     #每次启动下载后的下载数量，-1为不限
-    "waiting_play":False,   #是否在下载之间插入长睡眠，以模拟正常播放
-    "sleep_second":10,      #如果不启用长睡眠，每个下载的间隔
-    "download_vip":False,   #是否下载vip内容
-    "use_cache":False,       #是否使用缓存
-    "download_interval":10, #每多久下载一次，模拟用户一天不可能24h观看,仅设定了“once_download”时有效
-}
-
-update_setting={
-    "update_thread":1,      #更新线程数
-    "check_interval":86400, #检查更新的频率,-1是不检查
-}
-
-network={
-
-    "use_proxy":False,        #是否使用代理
-    "proxy_ip":"127.0.0.1",#代理ip
-    "proxy_port":"7897",  #代理端口
-
-    "use_cookie":True,                  #是否使用cookie
-    "domain":"https://www.pixiv.net",   #需要下载的域名
-
-    "cookie_file": "docker/resource/cookie.pkl",#cookies路径
-    
-    # 三个路径下的chrome_driver路径
-    "windows_chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chromedriver.exe",#windows路径
-    "linux_chrome_path": "/usr/local/bin/chromedriver",#linux路径
-    "mac_chrome_path": "/usr/local/bin/chromedriver",#mac路径
-
-    "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",#chrome路径
-}
+# 从文件加载实际内容，这里不保留内置默认值
+global_conf = {}
+path = {}
+download_setting = {}
+update_setting = {}
+network = {}
 
 
 def init_config():
@@ -344,8 +305,8 @@ def save_config_to_file(config_dict, dict_name):
     if config_manager.writer:
         config_manager.writer.save_config(config_dict, dict_name)
     else:
-        # 如果配置管理器未初始化，使用旧方法
-        config_dir = path['config_path']
+        # 如果配置管理器未初始化，使用固定目录
+        config_dir = os.path.join('docker', 'confs')
         config_file_path = os.path.join(config_dir, f"{dict_name}.json")
         try:
             with open(config_file_path, 'w', encoding='utf-8') as f:
@@ -367,14 +328,14 @@ def reload_config():
     if config_manager:
         config_manager.reload_config()
     else:
-        # 如果配置管理器未初始化，使用旧方法（统一加载所有配置，包括 global_conf）
+        # 如果配置管理器未初始化，使用固定目录（仅加载，不创建默认值）
         try:
             from .logger import logger
             logger.info("开始手动重载配置")
         except:
             pass
         
-        config_dir = path['config_path']
+        config_dir = os.path.join('docker', 'confs')
         config_dicts = {
             'path': path,
             'download_setting': download_setting,

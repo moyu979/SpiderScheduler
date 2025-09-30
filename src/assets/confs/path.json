@@ -1,0 +1,6 @@
+{
+    "db_file": "docker/spider.db",
+    "config_path": "docker/config",
+    "log_path": "docker/logs"
+}
+

@@ -4,9 +4,9 @@ SpiderScheduler 后端初始化模块
 """
 
 from src.initer.init_file_structure import init_files
-from src.utils.config import init_config
-from src.utils.logger import logger
-from src.utils.database import db_manager
+from src.utils.configs.config import init_config
+from src.utils.logger.logger import logger
+from src.utils.database.database import db_manager
 
 def init_backend():
     """初始化后端系统"""

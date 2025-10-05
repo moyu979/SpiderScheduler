@@ -5,7 +5,7 @@ SpiderScheduler 后端初始化模块
 
 from src.initer.init_file_structure import init_files
 from src.utils.configs.config import init_config
-from src.utils.logger.logger import logger
+import src.utils.logger.logger as logger
 from src.utils.database.database import db_manager
 
 def init_backend():
@@ -17,13 +17,10 @@ def init_backend():
     init_config()
     
     # 初始化数据库
-    if db_manager.init():
-        logger.info("数据库初始化成功")
-    else:
-        logger.error("数据库初始化失败")
+    db_manager.init_database()
+
+    logger.init_log()
     
     # 记录初始化完成日志
     logger.info("初始化conf和log完成")
 
-if __name__ == "__main__":
-    init_backend()

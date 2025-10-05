@@ -3,7 +3,7 @@ import logging
 import logging.handlers
 import inspect
 from datetime import datetime
-from .config import get_path
+import src.utils.configs.config as config
 
 # 全局日志缓存
 _log_cache = []
@@ -12,9 +12,11 @@ _logger_initialized = False
 class SpiderLogger:
     """SpiderScheduler 日志管理器"""
     
-    def __init__(self, name='SpiderScheduler'):
-        self.name = name
+    def __init__(self) -> None:
+        self.name = 'SpiderScheduler'
         self.logger = None
+
+    def init_log(self):
         self._setup_logger()
         self._flush_cache()
     
@@ -24,7 +26,7 @@ class SpiderLogger:
         
         try:
             # 获取日志路径
-            log_path = get_path('LOG_PATH')
+            log_path = config.get("path",'log_path')
             
             # 确保日志目录存在
             if not os.path.exists(log_path):
@@ -77,7 +79,8 @@ class SpiderLogger:
         if _logger_initialized and _log_cache:
             for cached_log in _log_cache:
                 self._log_with_class(
-                    getattr(logging, cached_log['level']),
+                    #getattr(logging, cached_log['level']),
+                    getattr(logging, "INFO"),
                     cached_log['message'],
                     cached_log['classname']
                 )
@@ -126,7 +129,7 @@ class SpiderLogger:
             
         current_month = datetime.now().strftime('%Y_%m')
         try:
-            log_path = get_path('LOG_PATH')
+            log_path = config.get("path",'log_path')
             expected_log_file = os.path.join(log_path, f'{current_month}.log')
             
             # 检查当前处理器是否指向正确的文件
@@ -263,3 +266,7 @@ def log(level, message):
 def setLevel(level):
     """设置日志级别"""
     logger.setLevel(level)
+
+def init_log():
+    """初始化日志"""
+    logger.init_log()

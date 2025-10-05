@@ -146,3 +146,7 @@ network = {}
 def init_config():
     """初始化配置函数"""
     config_manager.init_config_system()
+
+def get(dict,key):
+    global config_manager
+    return config_manager.config_dicts.get(dict,{}).get(key)

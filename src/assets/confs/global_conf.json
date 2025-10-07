@@ -1,5 +1,5 @@
 {
     "run": false,
-    "conf_reload_interval": 300
+    "conf_reload_interval": 10
 }
 

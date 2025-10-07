@@ -3,11 +3,13 @@ import logging
 import logging.handlers
 import inspect
 from datetime import datetime
-import src.utils.configs.config as config
+import threading
+from src.configs import config
 
 # 全局日志缓存
 _log_cache = []
 _logger_initialized = False
+_lock = threading.Lock()
 
 class SpiderLogger:
     """SpiderScheduler 日志管理器"""
@@ -17,6 +19,10 @@ class SpiderLogger:
         self.logger = None
 
     def init_log(self):
+        global _log_cache
+        print("初始化日志")
+        print(_log_cache)
+
         self._setup_logger()
         self._flush_cache()
     
@@ -66,34 +72,48 @@ class SpiderLogger:
             
         except Exception as e:
             # 如果初始化失败，记录到缓存
-            _log_cache.append({
-                'level': 'ERROR',
-                'message': f'日志系统初始化失败: {e}',
-                'classname': 'SpiderLogger'
-            })
+            with _lock:
+                _log_cache.append({
+                    'level': 'ERROR',
+                    'message': f'日志系统初始化失败: {e}',
+                    'classname': 'SpiderLogger'
+                })
     
     def _flush_cache(self):
         """刷新缓存中的日志"""
         global _log_cache, _logger_initialized
         
-        if _logger_initialized and _log_cache:
-            for cached_log in _log_cache:
+        if not _logger_initialized:
+            return
+        with _lock:
+            if not _log_cache:
+                return
+            pending = _log_cache[:]
+            _log_cache.clear()
+            for cached_log in pending:
+                # 兼容字符串与数值级别
+                level = cached_log.get('level', logging.INFO)
+                if isinstance(level, str):
+                    level = logging._nameToLevel.get(level.upper(), logging.INFO)
                 self._log_with_class(
-                    #getattr(logging, cached_log['level']),
-                    getattr(logging, "INFO"),
-                    cached_log['message'],
+                    level,
+                    "(cached)" + cached_log['message'],
                     cached_log['classname']
                 )
-            _log_cache.clear()
     
     def _cache_log(self, level, message, classname='Unknown'):
         """缓存日志消息"""
         global _log_cache
-        _log_cache.append({
-            'level': level,
-            'message': message,
-            'classname': classname
-        })
+        # 将 level 统一存为数值，避免后续刷新时类型不一致
+        normalized_level = level
+        if isinstance(normalized_level, str):
+            normalized_level = logging._nameToLevel.get(normalized_level.upper(), logging.INFO)
+        with _lock:
+            _log_cache.append({
+                'level': normalized_level,
+                'message': message,
+                'classname': classname
+            })
     
     def _get_calling_class(self):
         """获取调用日志的类名"""

@@ -2,8 +2,8 @@ import os
 import sqlite3
 import shutil
 from datetime import datetime
-import src.utils.configs.config as config
-from src.utils.logger import logger
+import src.configs.config as config
+from src.logger import logger
 
 class DatabaseManager:
     """数据库管理器"""
@@ -82,3 +82,6 @@ class DatabaseManager:
 
 # 创建默认数据库管理器实例
 db_manager = DatabaseManager()
+
+def init_database():
+    db_manager.init_database()

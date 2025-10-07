@@ -4,7 +4,9 @@ import sys
 import json
 import threading
 import time
-from src.utils.logger import logger
+from src.logger import logger
+
+from src.configs.globalVars import work_path
 
 class ConfigReader:
     """配置读取器类"""
@@ -74,14 +76,17 @@ class ConfigDaemon:
     def _daemon_loop(self):
         """守护线程循环"""
         while self.running:
+            
+            interval = self.config_dicts.get('global_conf', {}).get('conf_reload_interval', 300)
+            time.sleep(interval)  # 定期执行
+            logger.debug("守护线程启动一次")
             try:
                 # 重新加载所有配置（包含 global_conf）
                 self.config_reader.load_all_configs(self.config_dicts)
                 logger.debug("守护线程重载配置完成")
             except Exception as e:
                 logger.error(f"守护线程加载配置失败: {e}")
-            interval = self.config_dicts.get('global_conf', {}).get('conf_reload_interval', 300)
-            time.sleep(interval)  # 定期执行
+            
 
 
 class ConfigManager:
@@ -108,7 +113,7 @@ class ConfigManager:
         }
         
         # 固定配置目录为 docker/confs（仅从文件加载，不创建默认值文件）
-        self.config_dir = os.path.join('docker', 'confs')
+        self.config_dir = os.path.join(work_path, 'confs')
         
         # 创建配置读写器
         self.reader = ConfigReader(self.config_dir)
@@ -125,6 +130,7 @@ class ConfigManager:
     
     def _load_configs(self):
         """仅加载配置文件（不创建默认值），若缺失返回 False"""
+        logger.info(f"加载全部配置文件")
         self.reader.load_all_configs(self.config_dicts)
     
     def reload_config(self):

@@ -1,8 +1,9 @@
 from pathlib import Path
 import shutil
+from src.configs.globalVars import work_path
 
 
-def init_files(path="./docker") -> None:
+def init_files() -> None:
     """初始化根目录下的 `docker` 文件夹结构。
 
     要求：
@@ -14,7 +15,7 @@ def init_files(path="./docker") -> None:
     # 模板目录相对本文件（src/initer/ -> src/assets）
     assets_dir: Path = Path(__file__).resolve().parent.parent / "assets"
     # 最终文件目录
-    docker_dir: Path = Path(path)
+    docker_dir: Path = Path(work_path)
 
     if not assets_dir.exists() or not assets_dir.is_dir():
         # 如果模板目录不存在，直接返回（不做额外行为）

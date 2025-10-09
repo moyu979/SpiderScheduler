@@ -3,11 +3,12 @@ SpiderScheduler 后端初始化模块
 负责初始化配置系统和日志系统
 """
 
+from multiprocessing import managers
 from src.initer.init_file_structure import init_files
 from src.configs.config import init_config
 from src.logger import logger
 from src.database.database import db_manager
-
+from src.core.backend import BackendManager
 def init_backend():
     """初始化后端系统"""
     # 初始化文件结构
@@ -22,8 +23,10 @@ def init_backend():
     # 初始化数据库
     db_manager.init_database()
 
-    
-    
+    backend_manager = BackendManager()
+
     # 记录初始化完成日志
-    logger.info("初始化conf和log完成")
+    logger.info("初始化后端系统完成")
+
+    return backend_manager
 

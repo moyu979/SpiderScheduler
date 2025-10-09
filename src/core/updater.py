@@ -3,12 +3,11 @@ import time
 import sqlite3
 from abc import ABC, abstractmethod
 from typing import Callable, Type
-from ..utils.logger import logger
-from ..utils.config import get_update_setting
-from ..utils.database import db_manager
-from ..utils.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor
-from ..templates.update_a_user import UpdateUser
+from src.logger import logger
+import src.configs.config as config
 
+from src.database import db_manager
+from src.py_utils.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor
 
 class Updater(ABC):
     """
@@ -17,7 +16,7 @@ class Updater(ABC):
     为每个用户创建对应的update_a_user类实例，使用迭代器方式检查更新
     """
     
-    def __init__(self, update_user_class: Type[UpdateUser]):
+    def __init__(self, update_user_class):
         """
         初始化更新器
         
@@ -29,8 +28,8 @@ class Updater(ABC):
         self.auto_update.set()
         
         # 获取配置
-        self.update_thread = get_update_setting('update_thread')
-        self.check_interval = get_update_setting('check_interval')
+        self.update_thread = config.get('update_setting', 'update_thread')
+        self.check_interval = config.get('update_setting','check_interval')
         
         # 创建线程池
         self.executor = BlockingThreadPoolExecutor(

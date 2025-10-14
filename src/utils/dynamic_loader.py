@@ -6,7 +6,7 @@
 import importlib.util
 import os
 from typing import Any, Optional
-from ..logger import logger
+from src.utils.logging.logger import SpiderLogger as logger
 
 
 def load_class_from_file(file_path: str, class_name: str, module_name: Optional[str] = None) -> Any:

@@ -1,6 +1,6 @@
-from src.utils.logging.logger import logger
-from src.core.downloader import Downloader
-from src.core.updater import Updater
+from src.utils.logging.logger import SpiderLogger as logger
+from src.service.downloader import Downloader
+from src.service.updater import Updater
 
 
 

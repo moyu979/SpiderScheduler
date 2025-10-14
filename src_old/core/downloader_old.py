@@ -54,15 +54,6 @@ class Downloader:
         self._already_downloaded = 0
         self._total_download_time = 0
         
-        # 线程池
-        self.executor = BlockingThreadPoolExecutor(
-            max_workers=self.download_thread,
-            name="DownloadThreadPool"
-        )
-        
-        # 数据库连接
-        self.db = Database()
-        
         # 启动主循环
         self._main_thread = threading.Thread(target=self._main_loop, daemon=True)
         self._main_thread.start()

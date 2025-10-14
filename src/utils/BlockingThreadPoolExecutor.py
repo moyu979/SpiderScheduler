@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from threading import Semaphore, Lock, Event
 import time
 import threading
-from src.logger import logger
+from src.utils.logging.logger import SpiderLogger as logger
 
 class BlockingThreadPoolExecutor(ThreadPoolExecutor):
     """

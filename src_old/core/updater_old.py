@@ -26,7 +26,6 @@ class Updater(ABC):
         Args:
             update_user_class: UpdateUser的子类，用于处理特定用户的更新
         """
-        self.update_user_class = update_user_class
         self.auto_update = threading.Event()
         self.auto_update.set()
         

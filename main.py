@@ -1,6 +1,8 @@
 import signal
+import time
 import sys
 
+from src.core.backendManager import BackendManager
 from src.initer.init_backend import init_backend
 
 def signal_handler(sig, frame):
@@ -13,14 +15,15 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     # 初始化后端
-    backend_datas=init_backend()
+    init_backend()
+    backendManager = BackendManager()
     
     print("程序已启动，按 Ctrl+C 退出...")
     
     try:
         # 无限循环，直到收到中断信号
         while True:
-            signal.pause()  # 等待信号
+            time.sleep(1)  # Windows 下替代 signal.pause()
     except KeyboardInterrupt:
         print('\n程序被用户中断')
     finally:

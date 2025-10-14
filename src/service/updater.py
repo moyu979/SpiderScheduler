@@ -1,9 +1,9 @@
+from src.config.config import ConfigManager
+from src.config.globalVars import update_script_path
 
-from src.logger import logger
-from src.configs.globalVars import update_script_path
-from src.py_utils.dynamic_loader import load_class_from_file
-from src.py_utils.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor
-import src.configs.config as config
+from src.utils.dynamic_loader import load_class_from_file
+from src.utils.logging.logger import SpiderLogger as logger
+from src.utils.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor
 
 class Updater:
     """
@@ -18,8 +18,8 @@ class Updater:
         self.update_user_class = load_class_from_file(update_script_path, "UpdateUser")
         
         # 获取配置
-        self.update_thread = config.get('update_setting', 'update_thread')
-        self.check_interval = config.get('update_setting','check_interval')
+        self.update_thread = ConfigManager.get('update_setting', 'update_thread')
+        self.check_interval = ConfigManager.get('update_setting','check_interval')
 
         # 创建线程池
         self.executor = BlockingThreadPoolExecutor(
@@ -29,3 +29,9 @@ class Updater:
 
 
         logger.info("Updater初始化完成")
+
+    def update_thread():
+        
+
+
+    def update_once():

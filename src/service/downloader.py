@@ -2,7 +2,7 @@ from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
 from src.config.globalVars import download_script_path
 from src.utils.dynamic_loader import load_class_from_file
-from utils import BlockingThreadPoolExecutor
+from src.utils.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor
 
 
 class Downloader:

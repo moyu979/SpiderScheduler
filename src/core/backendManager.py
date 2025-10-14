@@ -9,7 +9,7 @@ class BackendManager:
 
         
         logger.info("BackendManager初始化")
-        self.downloader = Downloader()
+        #self.downloader = Downloader()
         self.updater = Updater()
         
 

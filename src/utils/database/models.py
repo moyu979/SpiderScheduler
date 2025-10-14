@@ -38,9 +38,11 @@ class User(Base):
 class Upload(Base):
     __tablename__ = "upload"
 
-    userId = Column(String, ForeignKey("user.userId"), nullable=False)
-    workNumber = Column(String, ForeignKey("works.workNumber"))
+    # 联合主键
+    userId = Column(String, ForeignKey("user.userId"), primary_key=True, nullable=False)
+    workNumber = Column(String, ForeignKey("works.workNumber"), primary_key=True)
     
+    # 可选：保留唯一约束，但联合主键已经保证唯一性
     __table_args__ = (
         UniqueConstraint("userId", "workNumber", name="uix_user_work"),
     )
@@ -51,3 +53,4 @@ class Upload(Base):
 
     def __repr__(self):
         return f"<Upload(userId={self.userId}, workNumber={self.workNumber})>"
+

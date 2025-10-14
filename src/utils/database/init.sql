@@ -13,7 +13,7 @@ CREATE TABLE works(
 CREATE TABLE upload(
     userId TEXT not NULL,
     workNumber TEXT,
-    UNIQUE (userId,workNumber)
+    PRIMARY KEY (userId, workNumber)
 );
 
 CREATE TABLE user(

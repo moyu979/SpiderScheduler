@@ -12,14 +12,12 @@ def init_backend():
     # 初始化文件结构
     init_files()
 
-    
     # 初始化配置系统
     init_config()
     
     #初始化日志系统
     logger.init_log()
 
-    
     # 初始化数据库
     init_database()
 

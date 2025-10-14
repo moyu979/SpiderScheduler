@@ -79,14 +79,13 @@
 from abc import ABC, abstractmethod
 
 
-class UpdateUser(ABC):
+class UpdateUser:
     def __init__(self, usr: dict,logging):
         # 基础框架：仅保存必要状态，具体逻辑由子类实现
         self.uid = usr.get('userId') if isinstance(usr, dict) else None
         self.page = 1
         self.works = []
 
-    @abstractmethod
     def get_one_page(self) -> None:
         pass
 

@@ -61,12 +61,11 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
 
-class DownloadWork(ABC):
+class DownloadWork:
     def __init__(self, work_id):
         # 基础骨架：仅保存必要状态，具体实现由子类完成
         self.work_id = work_id
 
-    @abstractmethod
     def download_it(self, path: Optional[str] = None) -> Dict[str, Any]:
         """子类实现具体下载逻辑，并返回结果字典。"""
         pass

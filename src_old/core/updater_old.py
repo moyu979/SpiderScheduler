@@ -7,7 +7,7 @@ from src.logger import logger
 import src.configs.config as config
 
 from src.database import db_manager
-from src.py_utils.BlockingThreadPoolExecutor import BlockingThreadPoolExecutor
+
 
 class Updater(ABC):
     """
@@ -15,8 +15,11 @@ class Updater(ABC):
     每隔配置中的check_interval时间，检查数据库中所有用户的uid，
     为每个用户创建对应的update_a_user类实例，使用迭代器方式检查更新
     """
-    
-    def __init__(self, update_user_class):
+    def __init__(self):
+        logger.info("Updater初始化")
+        pass
+
+    def init__(self, update_user_class):
         """
         初始化更新器
         
@@ -27,16 +30,8 @@ class Updater(ABC):
         self.auto_update = threading.Event()
         self.auto_update.set()
         
-        # 获取配置
-        self.update_thread = config.get('update_setting', 'update_thread')
-        self.check_interval = config.get('update_setting','check_interval')
         
-        # 创建线程池
-        self.executor = BlockingThreadPoolExecutor(
-            max_workers=self.update_thread, 
-            name="UserUpdater"
-        )
-        
+
         # 统计信息
         self.update_count = 0
         self.lock = threading.Lock()

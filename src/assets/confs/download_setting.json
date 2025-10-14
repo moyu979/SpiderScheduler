@@ -1,6 +1,4 @@
 {
-    "download_path": "docker/download",
-    "download_cache_path": "docker/download_cache",
     "download_thread": 1,
     "once_download": -1,
     "waiting_play": false,

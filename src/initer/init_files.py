@@ -1,6 +1,6 @@
 from pathlib import Path
 import shutil
-from src.configs.globalVars import work_path
+from src.config.globalVars import work_path
 
 
 def init_files() -> None:

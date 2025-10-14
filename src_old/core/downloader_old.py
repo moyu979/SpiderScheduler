@@ -18,8 +18,11 @@ class Downloader:
     下载管理器
     管理下载任务，控制下载线程，处理下载间隔
     """
+    def __init__(self):
+        logger.info("Downloader初始化")
+        pass
     
-    def __init__(self, downloader_class):
+    def init__(self, downloader_class):
         """
         初始化下载管理器
         
@@ -29,6 +32,7 @@ class Downloader:
         self.downloader_class = downloader_class
         
         # 事件控制
+        
         self.start_event = threading.Event()
         self.start_event.set()  # 默认启动
         
@@ -154,7 +158,7 @@ class Downloader:
         
         Returns:
             str: 作品ID，如果没有任务则返回None
-        """
+        
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()

@@ -10,7 +10,7 @@ class BackendManager:
 
         
         logger.info("BackendManager初始化")
-        self.downloader = None
+        self.downloader = Downloader()
         self.updater = Updater()
         #rest_api = RestApiService(self.updater, self.downloader)
         

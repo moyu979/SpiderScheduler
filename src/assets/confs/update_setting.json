@@ -1,4 +1,5 @@
 {
+    "do_update": false,
     "update_thread": 1,
     "check_interval": 86400,
     "commit_interval":0

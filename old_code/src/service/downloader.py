@@ -81,7 +81,19 @@ class Downloader:
                         
                         # 包装下载任务，包含waiting_play逻辑
                         def download_task(work_data, waiting_play_flag, download_interval):
-                            downloader_instance = self.downloader_class(work_data, logger)
+                            # 获取下载相关配置
+                            download_path = ConfigManager.get('download_setting', 'download_path')
+                            cache_path = ConfigManager.get('download_setting', 'cache_path')
+                            use_cache = ConfigManager.get('download_setting', 'use_cache')
+                            
+                            # 初始化DownloadWork实例，传递正确的参数
+                            downloader_instance = self.downloader_class(
+                                work_info=work_data,
+                                download_path=download_path,
+                                cache_path=cache_path,
+                                use_cache=use_cache,
+                                logger=logger
+                            )
                             downloader_instance.start()
                             
                             # 根据waiting_play决定是否睡眠

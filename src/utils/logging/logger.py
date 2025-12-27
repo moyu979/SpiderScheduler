@@ -29,6 +29,7 @@ class SpiderLogger:
                 os.makedirs(log_path, exist_ok=True)
             cls._logger = logging.getLogger(cls.name)
             cls._logger.setLevel(logging.DEBUG)
+            cls._logger.propagate = False  # 禁用传播，避免重复输出
             cls._logger.handlers.clear()
             formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - [%(classname)s] - %(message)s',
@@ -40,7 +41,7 @@ class SpiderLogger:
             file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(formatter)
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.INFO)
+            console_handler.setLevel(logging.DEBUG)
             console_handler.setFormatter(formatter)
             cls._logger.addHandler(file_handler)
             cls._logger.addHandler(console_handler)

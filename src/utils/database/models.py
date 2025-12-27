@@ -5,6 +5,9 @@ Base = declarative_base()
 
 
 class Works(Base):
+    """
+    作品表
+    """
     __tablename__ = "works"
 
     workNumber = Column(String, primary_key=True)  # 唯一标识
@@ -27,6 +30,7 @@ class User(Base):
 
     userId = Column(String, primary_key=True)  # 唯一标识
     addTime = Column(String)
+    state = Column(String, default="inQueue")
 
     # 与 upload 关联
     uploads = relationship("Upload", back_populates="user")

@@ -1,13 +1,26 @@
 import signal
 import time
 import sys
+import os
 
-from src.core.backendManager import BackendManager
-from src.initer.init_backend import init_backend
+#from src.core.backendManager import BackendManager
+#from src.initer.init_backend import init_backend
+
+from src.core.initialization import init
+from src.server.rest_api import rest_api
 
 def signal_handler(sig, frame):
     """处理 Ctrl+C 信号"""
     print('\n收到中断信号，正在安全退出...')
+    
+    # 停止 REST API 服务
+    if rest_api:
+        try:
+            rest_api.stop()
+        except Exception as e:
+            print(f"停止 REST API 服务时出错: {e}")
+    
+    # 退出程序
     sys.exit(0)
 
 def main():
@@ -15,9 +28,9 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     # 初始化后端
-    init_backend()
-    backendManager = BackendManager()
     
+    #backendManager = BackendManager()
+    init()
     print("程序已启动，按 Ctrl+C 退出...")
     
     try:

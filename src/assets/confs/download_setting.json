@@ -1,4 +1,5 @@
 {
+    "do_download": false,
     "download_thread": 1,
     "once_download": -1,
     "waiting_play": false,

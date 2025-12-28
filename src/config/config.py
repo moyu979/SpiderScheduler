@@ -15,9 +15,11 @@ class GetUnknownKey(Exception):
 
 class ConfigManager:
     """配置管理器类"""
-    
+
     # 全局配置字典
     config_dict = {}
+    # 配置字典访问锁
+    _config_lock = threading.Lock()
     # 守护线程状态
     _daemon_thread = None
     _running = False
@@ -30,29 +32,29 @@ class ConfigManager:
 
     @classmethod
     def load_all_configs(cls):
-
         """初始化配置函数 - 加载config_path中的所有JSON文件"""
-        # 清空全局字典
-        cls.config_dict.clear()
-        
-        # 遍历config_path中的所有JSON文件
-        if os.path.exists(config_path):
-            for filename in os.listdir(config_path):
-                if filename.endswith('.json'):
-                    # 去掉.json后缀作为key
-                    config_name = filename[:-5]
-                    config_file_path = os.path.join(config_path, filename)
-                    
-                    try:
-                        with open(config_file_path, 'r', encoding='utf-8') as f:
-                            config_data = json.load(f)
-                            cls.config_dict[config_name] = config_data
-                            logger.debug(f"加载配置文件: {config_file_path}")
-                    except Exception as e:
-                        logger.error(f"加载配置文件失败 {config_file_path}: {e}")
-        else:
-            logger.error(f"配置目录不存在: {config_path}")
-            raise FileNotFoundError(f"配置目录不存在: {config_path}")
+        with cls._config_lock:
+            # 清空全局字典
+            cls.config_dict.clear()
+
+            # 遍历config_path中的所有JSON文件
+            if os.path.exists(config_path):
+                for filename in os.listdir(config_path):
+                    if filename.endswith('.json'):
+                        # 去掉.json后缀作为key
+                        config_name = filename[:-5]
+                        config_file_path = os.path.join(config_path, filename)
+
+                        try:
+                            with open(config_file_path, 'r', encoding='utf-8') as f:
+                                config_data = json.load(f)
+                                cls.config_dict[config_name] = config_data
+                                logger.debug(f"加载配置文件: {config_file_path}")
+                        except Exception as e:
+                            logger.error(f"加载配置文件失败 {config_file_path}: {e}")
+            else:
+                logger.error(f"配置目录不存在: {config_path}")
+                raise FileNotFoundError(f"配置目录不存在: {config_path}")
     
     @classmethod
     def start_daemon(cls):
@@ -83,53 +85,58 @@ class ConfigManager:
     @classmethod
     def get(cls, dict_name, key):
         """获取配置值"""
-        value=cls.config_dict.get(dict_name, {}).get(key,None)
-        if value is None:
-            logger.error(f"配置值不存在: {dict_name}, {key}")
-            raise GetUnknownKey(f"配置值不存在: {dict_name}, {key}")
-        return value
+        with cls._config_lock:
+            value = cls.config_dict.get(dict_name, {}).get(key, None)
+            if value is None:
+                logger.error(f"配置值不存在: {dict_name}, {key}")
+                for key in cls.config_dict.keys():
+                    print(f"配置值: {key}")
+                raise GetUnknownKey(f"配置值不存在: {dict_name}, {key}")
+            return value
         
     @classmethod
     def set(cls, dict_name, key, value):
         """设置配置值并保存到文件"""
-        if dict_name not in cls.config_dict:
-            logger.error(f"配置字典不存在: {dict_name}")
-            raise KeyError(f"配置字典不存在: {dict_name}")
-        logger.debug(f"设置配置值: {dict_name}, {key}, {value}")
-        cls.config_dict[dict_name][key] = value
-        cls._save_config(dict_name)
+        with cls._config_lock:
+            if dict_name not in cls.config_dict:
+                logger.error(f"配置字典不存在: {dict_name}")
+                raise KeyError(f"配置字典不存在: {dict_name}")
+            logger.debug(f"设置配置值: {dict_name}, {key}, {value}")
+            cls.config_dict[dict_name][key] = value
+            cls._save_config(dict_name)
     
     @classmethod
     def _save_config(cls, dict_name):
         """将指定配置字典保存到文件"""
-        if dict_name not in cls.config_dict:
-            logger.error(f"配置字典不存在，无法保存: {dict_name}")
-            return
+        with cls._config_lock:
+            if dict_name not in cls.config_dict:
+                logger.error(f"配置字典不存在，无法保存: {dict_name}")
+                return
         
-        config_file_path = os.path.join(config_path, f"{dict_name}.json")
-        
-        try:
-            # 确保目录存在
-            os.makedirs(config_path, exist_ok=True)
-            
-            # 写入文件（使用临时文件确保原子性）
-            temp_file_path = config_file_path + ".tmp"
-            with open(temp_file_path, 'w', encoding='utf-8') as f:
-                json.dump(cls.config_dict[dict_name], f, ensure_ascii=False, indent=4)
-            
-            # 原子性替换
-            os.replace(temp_file_path, config_file_path)
-            logger.debug(f"配置已保存到文件: {config_file_path}")
-        except Exception as e:
-            logger.error(f"保存配置文件失败 {config_file_path}: {e}")
-            # 清理临时文件
-            temp_file_path = config_file_path + ".tmp"
-            if os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                except:
-                    pass
-            raise
+            config_file_path = os.path.join(config_path, f"{dict_name}.json")
+
+            try:
+                # 确保目录存在
+                os.makedirs(config_path, exist_ok=True)
+
+                # 写入文件（使用临时文件确保原子性）
+                temp_file_path = config_file_path + ".tmp"
+                with open(temp_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(cls.config_dict[dict_name], f, ensure_ascii=False, indent=4)
+
+                # 原子性替换
+                os.replace(temp_file_path, config_file_path)
+                logger.debug(f"配置已保存到文件: {config_file_path}")
+            except Exception as e:
+                logger.error(f"保存配置文件失败 {config_file_path}: {e}")
+                # 清理临时文件
+                temp_file_path = config_file_path + ".tmp"
+                if os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                    except:
+                        pass
+                raise
 
     
 config_manager = ConfigManager()

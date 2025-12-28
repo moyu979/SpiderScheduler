@@ -12,6 +12,8 @@ from src.config.globalVars import work_path
 from src.utils.database.database import DatabaseManager
 from src.utils.logging.logger import SpiderLogger as logger
 from src.server.rest_api import init as init_rest_api
+from src.service.updater import init as init_updater
+from src.service.downloader import init as init_downloader
 
 def init_files() -> None:
     """初始化工作目录结构"""
@@ -52,6 +54,12 @@ def init():
     
     # 5. 初始化REST API服务
     init_rest_api()
+
+    # 6. 初始化更新器
+    init_updater()
+
+    # 7. 初始化下载器
+    init_downloader()
 
     # 5. 记录完成
     logger.info("初始化后端系统完成")

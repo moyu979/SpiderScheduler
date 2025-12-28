@@ -4,7 +4,7 @@ import time
 import threading
 from src.utils.logging.logger import SpiderLogger as logger
 
-class BlockingThreadPoolExecutor(ThreadPoolExecutor):
+class ThreadPool(ThreadPoolExecutor):
     """
     阻塞式线程池执行器
     维持指定数量的线程运行，当所有线程都在工作时，新的任务会阻塞等待
@@ -32,13 +32,6 @@ class BlockingThreadPoolExecutor(ThreadPoolExecutor):
         """
         if self._shutdown_event.is_set():
             raise RuntimeError("线程池已关闭")
-        
-        # 检查是否正在调整线程数
-        if self._resizing:
-            logger.warning(f"线程池正在调整大小到 {self._target_workers}，任务提交被阻塞")
-            # 等待调整完成
-            while self._resizing:
-                time.sleep(0.1)
         
         # 阻塞直到有一个线程空闲
         logger.debug(f"等待可用线程... (当前活跃任务: {self._active_tasks})")
@@ -134,96 +127,9 @@ class BlockingThreadPoolExecutor(ThreadPoolExecutor):
         self.shutdown(wait=True)
         return False
     
-    def resize(self, new_max_workers):
-        """
-        动态调整线程池大小
-        注意：只能增加线程数，不能减少（因为可能有正在执行的任务）
-        """
-        if self._shutdown_event.is_set():
-            raise RuntimeError("线程池已关闭，无法调整大小")
-        
-        if new_max_workers <= 0:
-            raise ValueError("线程数必须大于0")
-        
-        with self._lock:
-            old_max_workers = self._max_workers
-            
-            if new_max_workers < old_max_workers:
-                logger.warning(f"尝试减少线程数从 {old_max_workers} 到 {new_max_workers}，"
-                             f"但当前有 {self._active_tasks} 个活跃任务，"
-                             f"建议等待任务完成后再减少线程数")
-                return False
-            
-            # 更新线程池大小
-            self._max_workers = new_max_workers
-            
-            # 更新信号量（增加可用线程数）
-            additional_threads = new_max_workers - old_max_workers
-            for _ in range(additional_threads):
-                self._sema.release()
-            
-            logger.info(f"线程池 {self._name} 线程数从 {old_max_workers} 调整到 {new_max_workers}")
-            return True
-    
     def get_max_workers(self):
         """获取当前最大线程数"""
         return self._max_workers
-    
-    def can_reduce_workers(self):
-        """检查是否可以安全地减少线程数"""
-        with self._lock:
-            return self._active_tasks == 0
-    
-    def force_resize(self, new_max_workers):
-        """
-        强制调整线程池大小（包括减少线程数）
-        注意：减少线程数时，新的任务提交会阻塞直到活跃任务数减少
-        """
-        if self._shutdown_event.is_set():
-            raise RuntimeError("线程池已关闭，无法调整大小")
-        
-        if new_max_workers <= 0:
-            raise ValueError("线程数必须大于0")
-        
-        with self._lock:
-            old_max_workers = self._max_workers
-            
-            if new_max_workers < old_max_workers:
-                # 减少线程数时，需要等待活跃任务完成
-                logger.warning(f"强制减少线程数从 {old_max_workers} 到 {new_max_workers}，"
-                             f"当前有 {self._active_tasks} 个活跃任务")
-                
-                # 设置调整标志，阻止新任务提交
-                self._resizing = True
-                self._target_workers = new_max_workers
-                
-                # 等待活跃任务数减少到新线程数以下
-                while self._active_tasks >= new_max_workers:
-                    logger.debug(f"等待活跃任务数减少，当前: {self._active_tasks}, 目标: {new_max_workers}")
-                    time.sleep(1)
-                
-                # 清除调整标志
-                self._resizing = False
-                self._target_workers = None
-            
-            # 更新线程池大小
-            self._max_workers = new_max_workers
-            
-            if new_max_workers > old_max_workers:
-                # 增加线程数
-                additional_threads = new_max_workers - old_max_workers
-                for _ in range(additional_threads):
-                    self._sema.release()
-            else:
-                # 减少线程数，需要重新创建信号量
-                # 先释放当前信号量
-                for _ in range(self._sema._value):
-                    self._sema.release()
-                # 重新创建信号量
-                self._sema = Semaphore(new_max_workers)
-            
-            logger.info(f"线程池 {self._name} 线程数强制调整到 {new_max_workers}")
-            return True
 
 if __name__ == "__main__":
     # 示例用法

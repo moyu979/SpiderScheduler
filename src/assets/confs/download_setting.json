@@ -1,0 +1,11 @@
+{
+    "do_download": false,
+    "download_thread": 1,
+    "once_download": -1,
+    "waiting_play": false,
+    "sleep_second": 10,
+    "download_vip": false,
+    "use_cache": false,
+    "download_interval": 10
+}
+

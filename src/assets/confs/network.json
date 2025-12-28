@@ -1,0 +1,18 @@
+{
+    "use_proxy": false,
+    "proxy_ip": "127.0.0.1",
+    "proxy_port": "7897",
+
+    "cookie_file": "docker/resource/cookie.pkl",
+    "use_cookie": true,
+    "domain": "https://www.pixiv.net",
+    
+    "windows_chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chromedriver.exe",
+    "linux_chrome_path": "/usr/local/bin/chromedriver",
+    "mac_chrome_path": "/usr/local/bin/chromedriver",
+    "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+
+    "rest_api_host": "0.0.0.0",
+    "rest_api_port": 5000
+}
+

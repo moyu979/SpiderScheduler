@@ -2,3 +2,5 @@ flask==2.3.3
 requests==2.31.0
 selenium==4.15.2
 webdriver-manager==4.0.1 
+SQLAlchemy==2.0.44
+greenlet==3.2.4

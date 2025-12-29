@@ -19,7 +19,7 @@ class ConfigManager:
     # 全局配置字典
     config_dict = {}
     # 配置字典访问锁
-    _config_lock = threading.Lock()
+    _config_lock = threading.RLock()
     # 守护线程状态
     _daemon_thread = None
     _running = False

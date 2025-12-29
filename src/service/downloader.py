@@ -17,6 +17,10 @@ class Downloader:
     管理下载任务，控制下载线程，处理下载间隔
     """
     def __init__(self):
+        self.downloader_class = None
+        self.executor = None
+        
+    def init(self):
         logger.info("Downloader初始化")
         
         # 动态加载DownloadWork类，用于下载任务
@@ -139,8 +143,8 @@ class Downloader:
                 logger.error(f"下载轮次异常: {e}")
                 time.sleep(5)  # 异常后休眠较长时间
 
-downloader = None
+downloader = Downloader()
 
 def init():
     global downloader
-    downloader = Downloader()
+    downloader.init()

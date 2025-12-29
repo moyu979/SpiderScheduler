@@ -19,6 +19,10 @@ class Updater:
     为每个用户创建对应的update_a_user类实例，使用迭代器方式检查更新
     """
     def __init__(self):
+        self.update_user_class = None
+        self.executor = None
+        
+    def init(self):
         logger.info("Updater初始化开始")
         
         # 动态加载UpdateUser类，用于特定用户的更新
@@ -138,9 +142,9 @@ class Updater:
                 # 简单退避，避免异常导致的忙等
                 time.sleep(5)
 
-updater = None
+updater = Updater()
 
 def init():
     global updater
-    updater = Updater()
+    updater.init() 
     updater.start()

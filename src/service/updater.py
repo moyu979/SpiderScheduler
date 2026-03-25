@@ -1,5 +1,5 @@
 from src.config.config import ConfigManager
-from src.config.globalVars import update_script_path
+from src.config.paths import update_script_path
 
 from src.utils.dynamic_loader import load_class_from_file
 from src.utils.logging.logger import SpiderLogger as logger

@@ -1,0 +1,11 @@
+
+# 示例（SQLite）：sqlite:///./docker/datas/spider.db
+# 示例（Postgres）：postgresql+psycopg2://user:password@127.0.0.1:5432/spider
+# 约定：使用环境变量占位符（需在配置加载层做变量替换）
+# BASE_PATH 默认可约定为 ./docker
+url: "sqlite:///./${DB_PATH}"
+
+  # 透传给 SQLAlchemy create_engine 的参数（按需调整）
+echo: true
+connect_args:
+  check_same_thread: false

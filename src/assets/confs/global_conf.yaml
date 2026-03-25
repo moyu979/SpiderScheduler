@@ -1,0 +1,12 @@
+# 是否✅
+run: false
+
+# 配置重载间隔（单位：秒）
+conf_reload_interval: 10
+# 认为载入配置失败，进行重试的间隔（单位：秒）
+conf_retry_interval: 10
+
+# 是否调试模式
+debug: false
+
+

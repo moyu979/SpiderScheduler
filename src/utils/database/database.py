@@ -1,8 +1,9 @@
 import os
 from contextlib import contextmanager
 from typing import Generator
+from src.config.config import config_manager
 from sqlalchemy.orm import Session
-from src.config.globalVars import db_path
+from src.config.paths import db_path as _global_db_path
 from src.utils.logging.logger import SpiderLogger as logger
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -17,17 +18,22 @@ class DatabaseManager:
     @classmethod
     def init_database(cls):
         """初始化数据库"""
-        cls.db_path = db_path
+        # paths.py 的 db_path 是函数，这里要调用获取实际路径
+        cls.db_path = _global_db_path()
         
-        # 确保数据库目录存在
+        # 确保数据库目录存在（仅适用于本地文件型 SQLite：cls.db_path 应为可映射到本机文件系统的路径。
+        # 若未来改为远程数据库/IP/连接串形式，这段 dirname/makedirs 逻辑可能失效或产生不可预期的行为）
         db_dir = os.path.dirname(cls.db_path)
         if not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
             logger.info(f"创建数据库目录: {db_dir}")
         
+
+        db_url = config_manager.get('database', 'url').replace('${DB_PATH}', _global_db_path())
         # 创建数据库引擎
         cls.engine = create_engine(
-            f"sqlite:///{cls.db_path}",
+            #f"sqlite:///{cls.db_path}",
+            db_url,
             echo=True,
             connect_args={"check_same_thread": False}
         )
@@ -43,14 +49,6 @@ class DatabaseManager:
 
         # 创建会话工厂
         cls.SessionLocal = sessionmaker(bind=cls.engine)
-
-        # 启动时将处于 downloading 状态的作品重置为 inQueue
-        with cls.get_db_session() as session:
-            try:
-                session.execute(text("UPDATE works SET state='inQueue' WHERE state='downloading'"))
-            except Exception as e:
-                # 如果表不存在或没有数据，忽略错误
-                logger.debug(f"重置作品状态时出现异常（可能是正常情况）: {e}")
 
     @classmethod
     @contextmanager

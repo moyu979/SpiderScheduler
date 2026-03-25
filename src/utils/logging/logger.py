@@ -4,7 +4,7 @@ import logging.handlers
 import inspect
 from datetime import datetime
 import threading
-from src.config.globalVars import log_path as _global_log_path
+from src.config.paths import log_path as _global_log_path
 
 class SpiderLogger:
     """SpiderScheduler 日志管理器 (静态类)"""
@@ -24,7 +24,7 @@ class SpiderLogger:
     def _setup_logger(cls):
         """设置日志记录器"""
         try:
-            log_path = _global_log_path
+            log_path = _global_log_path()
             if not os.path.exists(log_path):
                 os.makedirs(log_path, exist_ok=True)
             cls._logger = logging.getLogger(cls.name)
@@ -128,20 +128,22 @@ class SpiderLogger:
                 classname = cls._get_calling_class()
             cls._cache_log(level, message, classname)
             return
-        cls._check_month_change()
-        if classname is None:
-            classname = cls._get_calling_class()
-        record = logging.LogRecord(
-            name=cls._logger.name,
-            level=level,
-            pathname='',
-            lineno=0,
-            msg=message,
-            args=(),
-            exc_info=None
-        )
-        record.classname = classname
-        cls._logger.handle(record)
+        # 序列化所有“实际写日志”的动作（包含跨月重置 handler）
+        with cls._lock:
+            cls._check_month_change()
+            if classname is None:
+                classname = cls._get_calling_class()
+            record = logging.LogRecord(
+                name=cls._logger.name,
+                level=level,
+                pathname='',
+                lineno=0,
+                msg=message,
+                args=(),
+                exc_info=None
+            )
+            record.classname = classname
+            cls._logger.handle(record)
     
     @classmethod
     def debug(cls, message):
@@ -169,19 +171,21 @@ class SpiderLogger:
             classname = cls._get_calling_class()
             cls._cache_log('ERROR', message, classname)
             return
-        cls._check_month_change()
-        classname = cls._get_calling_class()
-        record = logging.LogRecord(
-            name=cls._logger.name,
-            level=logging.ERROR,
-            pathname='',
-            lineno=0,
-            msg=message,
-            args=(),
-            exc_info=True
-        )
-        record.classname = classname
-        cls._logger.handle(record)
+        # 序列化异常日志的写入（包含跨月重置 handler）
+        with cls._lock:
+            cls._check_month_change()
+            classname = cls._get_calling_class()
+            record = logging.LogRecord(
+                name=cls._logger.name,
+                level=logging.ERROR,
+                pathname='',
+                lineno=0,
+                msg=message,
+                args=(),
+                exc_info=True
+            )
+            record.classname = classname
+            cls._logger.handle(record)
     
     @classmethod
     def log(cls, level, message):

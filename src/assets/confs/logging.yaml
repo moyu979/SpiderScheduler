@@ -1,0 +1,10 @@
+# 日志相关
+
+# 日志级别
+log_level: "INFO"
+# 日志格式
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# 日志最大文件大小（单位：MB）
+log_max_size: 100
+# 日志最大文件数量
+log_max_files: 10

@@ -7,8 +7,8 @@
 
 from pathlib import Path
 import shutil
-from src.config.config import ConfigManager
-from src.config.globalVars import work_path
+from src.config.config import config_manager
+
 from src.utils.database.database import DatabaseManager
 from src.utils.logging.logger import SpiderLogger as logger
 from src.server.rest_api import init as init_rest_api
@@ -18,7 +18,7 @@ from src.service.downloader import init as init_downloader
 def init_files() -> None:
     """初始化工作目录结构"""
     assets_dir = Path(__file__).resolve().parent.parent / "assets"
-    docker_dir = Path(work_path)
+    docker_dir = Path(config_manager.base_path)
     
     if not assets_dir.exists():
         raise FileNotFoundError("模板目录不存在")
@@ -43,7 +43,7 @@ def init():
     init_files()
     
     # 2. 初始化配置系统
-    ConfigManager.init_config()
+    config_manager.init_config()
     
     # 3. 初始化日志系统
     logger.init_log()
@@ -56,10 +56,10 @@ def init():
     init_rest_api()
 
     # 6. 初始化更新器
-    init_updater()
+    # init_updater()
 
     # 7. 初始化下载器
-    init_downloader()
+    # init_downloader()
 
     # 5. 记录完成
     logger.info("初始化后端系统完成")

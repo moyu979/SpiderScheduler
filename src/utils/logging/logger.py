@@ -24,6 +24,16 @@ class SpiderLogger:
     def _setup_logger(cls):
         """设置日志记录器"""
         try:
+            # 延迟导入，避免与 src.config.config 形成循环依赖
+            from src.config.config import config_manager
+
+            logging_conf = config_manager.config_dict.get("logging", {}) or {}
+            console_level_name = str(logging_conf.get("console_log_level", "INFO")).upper()
+            file_level_name = str(logging_conf.get("file_log_level", "DEBUG")).upper()
+
+            console_level = logging._nameToLevel.get(console_level_name, logging.INFO)
+            file_level = logging._nameToLevel.get(file_level_name, logging.DEBUG)
+
             log_path = _global_log_path()
             if not os.path.exists(log_path):
                 os.makedirs(log_path, exist_ok=True)
@@ -38,10 +48,10 @@ class SpiderLogger:
             current_month = datetime.now().strftime('%Y_%m')
             log_file = os.path.join(log_path, f'{current_month}.log')
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            file_handler.setLevel(logging.DEBUG)
+            file_handler.setLevel(file_level)
             file_handler.setFormatter(formatter)
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.DEBUG)
+            console_handler.setLevel(console_level)
             console_handler.setFormatter(formatter)
             cls._logger.addHandler(file_handler)
             cls._logger.addHandler(console_handler)

@@ -17,6 +17,9 @@ def db_path() -> str:
 def log_path() -> str:
     return os.path.join(base_path(), "datas", "log")
 
+def cookies_path() -> str:
+    return os.path.join(base_path(), "datas", "cookies")
+
 def download_path() -> str:
     return os.path.join(base_path(), "datas", "download")
 

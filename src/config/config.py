@@ -36,57 +36,61 @@ class ConfigManager:
     def init_config(cls):
         """获取配置值"""
         ConfigManager.load_all_configs()
-        ConfigManager._load_from_env()
         ConfigManager.start_daemon()
 
     @classmethod
     def load_all_configs(cls):
-        """初始化配置函数 - 加载config_path中的所有配置文件（优先 YAML，其次 JSON）"""
+        """加载 config_path 中的所有配置文件（优先 YAML，其次 JSON）
+
+        先在局部构建完整副本，最后整体替换 config_dict：
+        热重载期间读方（get/调度循环）不会看到清空后的空窗；
+        目录缺失等整体失败时旧配置原样保留。
+        """
+        loaded = {}
+        if os.path.exists(config_path()):
+            filenames = os.listdir(config_path())
+
+            # 同名配置优先级：yaml > yml > json
+            priority = {".yaml": 0, ".yml": 1, ".json": 2}
+            selected = {}
+            # 构建文件字典
+            for filename in filenames:
+                base, ext = os.path.splitext(filename)
+                ext = ext.lower()
+                if ext not in priority:
+                    continue
+                prev = selected.get(base)
+                if prev is None or priority[ext] < priority[prev[1]]:
+                    selected[base] = (filename, ext)
+
+            # 加载配置文件
+            for config_name, (filename, ext) in selected.items():
+                config_file_path = os.path.join(config_path(), filename)
+                try:
+                    with open(config_file_path, 'r', encoding='utf-8') as f:
+                        if ext in (".yaml", ".yml"):
+                            if yaml is None:
+                                raise RuntimeError(
+                                    "缺少 PyYAML 依赖，无法加载 YAML 配置文件。请安装 pyyaml。"
+                                )
+                            config_data = yaml.safe_load(f) or {}
+                        else:
+                            config_data = json.load(f)
+
+                    if not isinstance(config_data, dict):
+                        raise ValueError(f"配置文件根节点必须是对象/字典，实际为: {type(config_data)}")
+                    loaded[config_name] = config_data
+                    logger.debug(f"加载配置文件: {config_file_path}")
+                except Exception as e:
+                    logger.error(f"加载配置文件失败 {config_file_path}: {e}")
+        else:
+            logger.error(f"配置目录不存在: {config_path()}")
+            raise FileNotFoundError(f"配置目录不存在: {config_path()}")
+
         with cls._config_lock:
-            # 清空全局字典
-            cls.config_dict.clear()
-
-            # 遍历 config_path 中的配置文件
-            if os.path.exists(config_path()):
-                filenames = os.listdir(config_path())
-
-                # 同名配置优先级：yaml > yml > json
-                priority = {".yaml": 0, ".yml": 1, ".json": 2}
-                selected = {}
-                # 构建文件字典
-                for filename in filenames:
-                    base, ext = os.path.splitext(filename)
-                    ext = ext.lower()
-                    if ext not in priority:
-                        continue
-                    prev = selected.get(base)
-                    if prev is None or priority[ext] < priority[prev[1]]:
-                        selected[base] = (filename, ext)
-
-                # 加载配置文件
-                for config_name, (filename, ext) in selected.items():
-                    config_file_path = os.path.join(config_path(), filename)
-                    try:
-                        with open(config_file_path, 'r', encoding='utf-8') as f:
-                            if ext in (".yaml", ".yml"):
-                                if yaml is None:
-                                    raise RuntimeError(
-                                        "缺少 PyYAML 依赖，无法加载 YAML 配置文件。请安装 pyyaml。"
-                                    )
-                                config_data = yaml.safe_load(f) or {}
-                            else:
-                                config_data = json.load(f)
-
-                        if not isinstance(config_data, dict):
-                            raise ValueError(f"配置文件根节点必须是对象/字典，实际为: {type(config_data)}")
-                        #print(f"加载配置文件: {config_name}, {config_data}")
-                        cls.config_dict[config_name] = config_data
-                        logger.debug(f"加载配置文件: {config_file_path}")
-                    except Exception as e:
-                        logger.error(f"加载配置文件失败 {config_file_path}: {e}")
-            else:
-                logger.error(f"配置目录不存在: {config_path()}")
-                raise FileNotFoundError(f"配置目录不存在: {config_path()}")
+            # 整体换入 + 重新应用环境变量覆盖（仅内存，不回写文件）
+            cls.config_dict = loaded
+            cls._apply_env_overrides()
     
     @classmethod
     def start_daemon(cls):
@@ -137,25 +141,21 @@ class ConfigManager:
     
     @classmethod
     def get(cls, dict_name, key):
-        # print(f"获取配置值: {dict_name}, {key}")
-        """获取配置值"""
+        """获取配置值；字典或键不存在抛 GetUnknownKey，值为 None 合法；
+        字符串值中的 ${BASE_PATH} 占位符会替换为实际工作目录"""
         with cls._config_lock:
-            value = cls.config_dict.get(dict_name, {}).get(key, None)
-            if value is None:
-                logger.error(f"配置值不存在: {dict_name}, {key}")
-                if dict_name not in cls.config_dict:
-                    print(f"配置字典不存在: {dict_name}")
-                    for dict_name in cls.config_dict.keys():
-                        print(f"配置字典: {dict_name}")
-                    raise GetUnknownKey(f"配置字典不存在: {dict_name}")    
-                if key not in cls.config_dict[dict_name]:
-                    print(f"配置值不存在: {dict_name}, {key}")
-                    for key in cls.config_dict[dict_name].keys():
-                        print(f"配置值: {key}")
-                    raise GetUnknownKey(f"配置值不存在: {dict_name}, {key}")
-                # for key in cls.config_dict.keys():
-                #     print(f"配置值: {key}")
-                raise GetUnknownKey(f"读取配置遇到未知错误: {dict_name}, {key}")
+            config_data = cls.config_dict.get(dict_name)
+            if config_data is None:
+                existing = ", ".join(cls.config_dict.keys()) or "无"
+                logger.error(f"配置字典不存在: {dict_name}，现有: {existing}")
+                raise GetUnknownKey(f"配置字典不存在: {dict_name}")
+            if key not in config_data:
+                existing = ", ".join(config_data.keys()) or "无"
+                logger.error(f"配置值不存在: {dict_name}, {key}，现有键: {existing}")
+                raise GetUnknownKey(f"配置值不存在: {dict_name}, {key}")
+            value = config_data[key]
+            if isinstance(value, str) and '${BASE_PATH}' in value:
+                value = value.replace('${BASE_PATH}', str(cls.base_path))
             return value
         
     @classmethod
@@ -170,42 +170,39 @@ class ConfigManager:
             cls._save_config(dict_name)
     
     @classmethod
-    def _load_from_env(cls):
-        """从环境变量加载配置，覆盖已加载的配置值"""
+    def replace_section(cls, dict_name, data):
+        """整体替换一个已存在的配置段并原子写盘（供系统管理 API 使用）"""
         with cls._config_lock:
-            modified_dicts = set()  # 记录哪些字典被修改了
-            
-            # 第一步：遍历并更新内存中的配置（不保存文件）
-            for dict_name, config_data in cls.config_dict.items():
-                for key in config_data.keys():
-                    # 构建环境变量名：DICT_NAME_KEY (大写，下划线分隔)
-                    env_var_name = f"{dict_name.upper().replace('-', '_')}_{key.upper()}"
-                    
-                    # 检查环境变量是否存在
-                    env_value = os.environ.get(env_var_name)
-                    if env_value is not None:
-                        try:
-                            # 尝试解析为 JSON（支持布尔值、数字等）
-                            try:
-                                parsed_value = json.loads(env_value)
-                            except (json.JSONDecodeError, ValueError):
-                                # 如果不是有效的 JSON，作为字符串处理
-                                parsed_value = env_value
-                            
-                            # 直接更新内存中的配置（不保存文件）
-                            cls.config_dict[dict_name][key] = parsed_value
-                            modified_dicts.add(dict_name)  # 记录这个字典被修改了
-                            logger.info(f"从环境变量加载配置: {env_var_name} = {parsed_value}")
-                        except Exception as e:
-                            logger.warning(f"从环境变量加载配置失败 {env_var_name}: {e}")
-            
-            # 第二步：批量保存所有修改过的字典
-            for dict_name in modified_dicts:
+            if dict_name not in cls.config_dict:
+                raise KeyError(f"配置段不存在: {dict_name}")
+            if not isinstance(data, dict):
+                raise ValueError("配置段必须是键值映射")
+            cls.config_dict[dict_name] = data
+            cls._save_config(dict_name)
+
+    @classmethod
+    def _apply_env_overrides(cls):
+        """环境变量覆盖配置：仅内存生效，不写回配置文件；
+        load_all_configs 每次重载文件后重新应用，保证覆盖在热重载后依然有效"""
+        for dict_name, config_data in cls.config_dict.items():
+            for key in list(config_data.keys()):
+                # 构建环境变量名：DICT_NAME_KEY (大写，下划线分隔)
+                env_var_name = f"{dict_name.upper().replace('-', '_')}_{key.upper()}"
+                env_value = os.environ.get(env_var_name)
+                if env_value is None:
+                    continue
                 try:
-                    cls._save_config(dict_name)
-                    logger.debug(f"批量保存配置字典: {dict_name}")
+                    # 尝试解析为 JSON（支持布尔值、数字等）
+                    try:
+                        parsed_value = json.loads(env_value)
+                    except (json.JSONDecodeError, ValueError):
+                        # 如果不是有效的 JSON，作为字符串处理
+                        parsed_value = env_value
+
+                    config_data[key] = parsed_value
+                    logger.info(f"从环境变量加载配置: {env_var_name} = {parsed_value}")
                 except Exception as e:
-                    logger.error(f"保存配置字典失败 {dict_name}: {e}")
+                    logger.warning(f"从环境变量加载配置失败 {env_var_name}: {e}")
     
     @classmethod
     def _save_config(cls, dict_name):

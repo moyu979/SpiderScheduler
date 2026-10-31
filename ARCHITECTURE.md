@@ -2,311 +2,276 @@
 
 ## 项目概述
 
-SpiderScheduler 是一个基于用户脚本注入的爬虫调度系统，支持REST API接口，为前端提供完整的后端服务。
+SpiderScheduler 是一个**多站点、插件式**的爬虫调度系统：框架负责调度、队列、状态管理、REST API 和 REPL，
+具体的抓取/下载逻辑由用户脚本提供，按 `website` 标识分发。每个部署实例通过 `BASEPATH`（默认 `./docker`）
+拥有独立的工作目录、配置和数据库。
 
-## 核心设计理念
-
-- **用户脚本核心**：框架围绕用户编写的脚本设计，支持动态加载
-- **REST API优先**：提供完整的REST API接口供前端调用
-- **服务化架构**：清晰的职责分离，每个服务专注特定功能
-- **配置驱动**：通过配置文件控制系统行为
-- **单网站专注**：每个项目实例只处理一个网站
-
-## 项目结构
+## 目录结构（与代码一致）
 
 ```
-SpiderScheduler/                      # 后端项目根目录
-├── src/                              # 源代码目录
-│   ├── core/                         # 核心业务层
-│   │   ├── __init__.py
-│   │   └── backendManager.py         # 后端管理器（主协调器）
-│   │
-│   ├── api/                          # API层
-│   │   ├── __init__.py
-│   │   ├── server.py                 # Web服务器（Flask）
-│   │   ├── routes/                   # 路由模块
-│   │   │   ├── __init__.py
-│   │   │   ├── user_routes.py        # 用户管理API
-│   │   │   ├── task_routes.py        # 任务管理API
-│   │   │   ├── system_routes.py      # 系统管理API
-│   │   │   └── download_routes.py    # 下载管理API
-│   │   ├── middleware/               # 中间件
-│   │   │   ├── __init__.py
-│   │   │   ├── cors.py               # CORS中间件
-│   │   │   ├── logging.py            # 日志中间件
-│   │   │   └── error_handler.py      # 错误处理中间件
-│   │   └── schemas/                  # API数据模式
-│   │       ├── __init__.py
-│   │       ├── user_schemas.py       # 用户相关模式
-│   │       ├── task_schemas.py       # 任务相关模式
-│   │       └── response_schemas.py   # 响应模式
-│   │
-│   ├── services/                     # 业务服务层
-│   │   ├── __init__.py
-│   │   ├── download_service.py       # 下载服务（包含队列处理）
-│   │   ├── update_service.py         # 更新服务（包含定时调度）
-│   │   ├── user_service.py           # 用户服务
-│   │   └── script_service.py         # 脚本服务（动态加载管理）
-│   │
-│   ├── utils/                        # 工具和基础设施层
-│   │   ├── __init__.py
-│   │   ├── database/                 # 数据库相关
-│   │   │   ├── __init__.py
-│   │   │   ├── database.py           # 数据库管理
-│   │   │   └── init.sql              # 数据库初始化脚本
-│   │   ├── logging/                  # 日志系统
-│   │   │   ├── __init__.py
-│   │   │   └── logger.py             # 日志管理
-│   │   ├── storage/                  # 存储相关
-│   │   │   └── file_manager.py       # 文件管理
-│   │   ├── dynamic_loader.py         # 动态加载器
-│   │   ├── BlockingThreadPoolExecutor.py  # 线程池
-│   │   ├── browser_factory.py        # 浏览器工厂
-│   │   └── exceptions.py             # 异常定义
-│   │
-│   ├── initer/                       # 初始化模块
-│   │   ├── __init__.py
-│   │   ├── init_backend.py           # 后端初始化
-│   │   ├── init_config.py            # 配置初始化
-│   │   ├── init_database.py          # 数据库初始化
-│   │   └── init_file_structure.py    # 文件结构初始化
-│   │
-│   └── configs/                      # 配置相关
-│       ├── __init__.py
-│       ├── config.py                 # 配置管理
-│       └── globalVars.py             # 全局变量
-│
-├── scripts/                          # 用户脚本目录
-│   ├── download_a_work.py            # 用户编写的下载脚本
-│   ├── update_a_user.py              # 用户编写的更新脚本
-│   └── site_config.py                # 网站特定配置（可选）
-│
-├── assets/                           # 项目模板目录
-│   ├── confs/                        # 配置文件模板
-│   │   ├── download_setting.json
-│   │   ├── global_conf.json
-│   │   ├── network.json
-│   │   ├── path.json
-│   │   └── update_setting.json
-│   ├── datas/                        # 数据目录模板
-│   │   ├── log/
-│   │   └── spider.db
-│   ├── download/                     # 下载目录模板
-│   ├── download_cache/               # 缓存目录模板
-│   └── scripts/                      # 脚本目录模板
-│       ├── download_a_work.py
-│       └── update_a_user.py
-│
-├── tests/                            # 测试目录
-│   ├── __init__.py
-│   ├── run_tests.py
-│   └── utils/
-│       └── test_logger.py
-│
-├── requirements.txt                  # Python依赖
-├── main.py                           # 主入口文件
-└── FOLDER_STRUCTURE.md               # 项目结构说明
+SpiderScheduler/
+├── main.py                          # 入口：init() + 阻塞；--repl 进入命令行；--basepath 指定工作目录
+├── requirements.txt
+├── src/
+│   ├── core/initialization.py       # 统一初始化：文件 → 配置 → 日志 → 数据库 → REST API → Updater → Downloader
+│   ├── config/
+│   │   ├── config.py                # ConfigManager：加载/热重载/env 覆盖/原子写回
+│   │   └── paths.py                 # BASEPATH 下的各类路径
+│   ├── server/
+│   │   ├── rest_api.py              # Flask 服务（werkzeug make_server，后台线程，可优雅停止；托管前端页）
+│   │   ├── apis/                    # download_api / update_api / global_api / network_api / query_api（蓝图）
+│   │   └── web/index.html           # 前端单页应用（vanilla JS，无构建依赖，/ 路由直接托管）
+│   ├── service/
+│   │   ├── updater.py               # 更新调度：定期遍历发布位点 → UpdateUser 脚本 → 写 Works/Upload
+│   │   ├── downloader.py            # 下载调度：作品队列认领 → DownloadWork 脚本 → 状态回写
+│   │   └── dispatcher.py            # ScriptDispatcher：按 website 把任务路由到脚本类
+│   ├── cli/repl.py                  # 内置命令行（add-pos 等）
+│   ├── utils/
+│   │   ├── dynamic_loader.py        # importlib 动态加载
+│   │   ├── threadPool/threadPool.py # 阻塞式线程池（信号量限流 + 统计）
+│   │   ├── database/
+│   │   │   ├── database.py          # DatabaseManager：引擎/会话/PRAGMA/schema 迁移
+│   │   │   ├── models.py            # PublishPos / Works / Upload（复合主键 + 延迟复合外键）
+│   │   │   └── migrations/          # 结构迁移脚本（000N_说明.py）
+│   │   ├── cookie_manager.py        # CookieManager：按 website 存取登录 cookie（datas/cookies/）
+│   │   ├── browser/                 # Selenium 辅助（暂未接线，登录代理已替代其取 cookie 职责）
+│   │   └── logging/logger.py        # SpiderLogger：按月轮转文件 + 控制台
+│   └── assets/                      # 模板：confs/（yaml 配置）、scripts/（用户脚本骨架）、datas/
+├── docker/                          # BASEPATH 工作目录（运行时从 assets 生成，已被 .gitignore 忽略）
+│   ├── confs/  scripts/  datas/
+└── tests/                           # pytest：models / dispatcher / config / queue / migrations 等
 ```
 
-## 核心组件说明
+## 数据模型
 
-### 1. BackendManager (核心协调器)
-- **位置**: `src/core/backendManager.py`
-- **职责**: 协调所有服务，提供统一的后端管理接口
-- **功能**: 
-  - 初始化各个服务
-  - 启动定时任务
-  - 提供用户管理接口
-  - 管理服务生命周期
+三张表，全部以 `website` 入键（multiWeb 设计核心）：
 
-### 2. API层
-- **位置**: `src/api/`
-- **职责**: 提供REST API接口供前端调用
-- **组件**:
-  - `server.py`: Flask Web服务器
-  - `routes/`: 各种API路由
-  - `middleware/`: 中间件（CORS、日志、错误处理）
-  - `schemas/`: 数据验证模式
-
-### 3. 业务服务层
-- **位置**: `src/services/`
-- **职责**: 实现具体的业务逻辑
-- **服务**:
-  - `download_service.py`: 下载服务（包含队列处理）
-  - `update_service.py`: 更新服务（包含定时调度）
-  - `user_service.py`: 用户管理服务
-  - `script_service.py`: 脚本管理服务
-
-### 4. 工具和基础设施层
-- **位置**: `src/utils/`
-- **职责**: 提供工具函数和基础服务支持
-- **组件**:
-  - `database/`: 数据库操作
-  - `logging/`: 日志系统
-  - `storage/`: 文件存储
-  - `dynamic_loader.py`: 动态加载器
-  - `BlockingThreadPoolExecutor.py`: 线程池
-  - `browser_factory.py`: 浏览器工厂
-  - `exceptions.py`: 异常定义
-
-### 5. 配置管理
-- **位置**: `src/configs/`
-- **职责**: 配置管理和全局变量
-- **组件**:
-  - `config.py`: 配置管理器
-  - `globalVars.py`: 全局变量定义
-
-## API接口设计
-
-### 用户管理
-- `GET /api/users/` - 获取所有用户
-- `POST /api/users/` - 创建用户
-- `DELETE /api/users/{user_id}` - 删除用户
-
-### 任务管理
-- `POST /api/tasks/update` - 启动更新任务
-- `POST /api/tasks/download` - 启动下载任务
-- `GET /api/tasks/status` - 获取任务状态
-
-### 系统管理
-- `GET /api/system/status` - 获取系统状态
-- `GET /api/system/config` - 获取系统配置
-- `PUT /api/system/config` - 更新系统配置
-
-### 下载管理
-- `GET /api/downloads/queue` - 获取下载队列
-- `GET /api/downloads/history` - 获取下载历史
-
-## 数据流架构
+> 命名说明：原 `user` 表已更名为 `publish_pos`（发布位点）——它的语义不是"我们的账号"，
+> 而是"对某站点某作者的追踪位点"；`userId` 列统一更名为 `authorId`（含 upload 表）。
+> 该变更由迁移 `0002_rename_user_to_publish_pos.py` 完成（schema v1 → v2）。
 
 ```
-用户脚本 (scripts/)
-    ↓
-ScriptService (动态加载)
-    ↓
-BackendManager (协调)
-    ↓
-├── UpdateService (定时更新)
-│   └── 使用 UpdateUser 脚本
-└── DownloadService (下载队列)
-    └── 使用 DownloadWork 脚本
-    ↓
-REST API (Flask)
-    ↓
-前端应用
+publish_pos（发布位点）       works                          upload
+  authorId ─┐(PK)              workNumber ─┐(PK)              website  (PK)
+  website ──┘(PK)             website ────┘(PK)              authorId (PK, FK→publish_pos)
+  addTime                     upTime/title/kind              workNumber(PK, FK→works)
+  state                       state                          （多对多关联表）
+                              downloadDate
+                              downloadPriority
+                              otherInfo / downloadInfo
 ```
 
-## 初始化流程
+### 状态机（管线语义，代码与 API 共同遵守）
 
-```
-main.py
-    ↓
-init_backend()
-    ↓
-├── init_files() (文件结构)
-├── init_config() (配置系统)
-├── logger.init_log() (日志系统)
-├── db_manager.init_database() (数据库)
-└── BackendManager() (后端服务)
-    └── 启动定时任务
-    └── 启动API服务器
-```
+- `publish_pos.state`: `inQueue`（参与更新）/ `stopped`（Updater 跳过）。由 REPL / `stop_pos` API 设置。
+- `works.state`（下载管线）:
+  `inQueue（或 NULL，兼容旧数据） → downloading → done / failed`；
+  `stopped` 可随时由 `stop_work` API 置入：调度跳过、完成回调不覆盖。
+  下载中断残留的 `downloading` 会在下一轮开始时自动重置回 `inQueue`。
+- 源站自身的作品状态不入 `state`，由更新器存进 `otherInfo` 的 `siteState` 键（JSON）。
+- `works.downloadInfo`：该作品的统一下载参数（JSON 文本）。`add_work` API 可直接传 JSON 对象入库；
+  下载时反序列化为 dict，作为 `download_info` 参数交给脚本。站点差异尽量收拢在数据里而不是代码分支。
 
-## 用户脚本接口
+### 外键
 
-### 下载脚本接口
+`upload` → `publish_pos`、`works` 均为**复合外键**（完整覆盖父表联合主键），且 `DEFERRABLE INITIALLY DEFERRED`：
+两条外键共享 `website` 列，ORM 同批次 flush 时无法保证父表先插入，延迟到 commit 检查后
+插入顺序不再敏感，孤儿数据依然会被拒绝（需连接级 `PRAGMA foreign_keys=ON`，见下）。
+
+## 用户脚本契约与分发
+
+脚本放在 `BASEPATH/scripts/`，由框架动态加载。**website 路由约定**：
+
+- 依赖自描述：脚本头部可写 `# requirements: 包名[版本约束]`（可多行、逗号分隔），
+  框架在每次加载前检测缺失并自动 `pip install` 到当前环境，之后才执行脚本顶部的
+  import；安装失败仅记录日志，不阻断加载（导入错误会自然暴露）；
+- 脚本内任意公共类声明 `website = "pixiv"`（或站点列表 `["a", "b"]`）即注册到对应站点；
+  一个文件可以放多个站点的类，类名不限。
+- 文件内**没有任何类声明 website** 时，视为传统单站点脚本：回退到约定的类名
+  （`DownloadWork` / `UpdateUser`），对任意 website 生效——旧脚本无需改动即可继续工作。
+- 路由失败（无匹配且无兜底）抛 `ScriptRouteError`，错误信息列出可用站点。
+
+### 更新脚本（每用户一个实例，迭代器协议）
+
 ```python
-# scripts/download_a_work.py
+class UpdateUser:            # 或多个类各自声明 website
+    website = "pixiv"        # 不声明则整体兜底
+
+    def __init__(self, usr: dict, logging): ...   # usr 含 authorId/website/addTime（发布位点信息）
+    def get_one_page(self): ...                   # 抓一页，填充 self.works
+    def __iter__(self): ...   # 重置
+    def __next__(self): ...   # 逐条产出 dict：workid/workNumber、upTime、title、
+                              # kind、state（→ 源站状态，存 otherInfo.siteState）、
+                              # downloadDate、downloadPriority
+```
+
+更新器逐条入库：新作品写 `works`（state=inQueue），`upload` 建关联；`upload` 重复即认为
+该用户已同步到历史点，停止本用户迭代。
+
+### 下载脚本（每作品一个实例）
+
+```python
 class DownloadWork:
-    def __init__(self, work_id: str):
-        self.work_id = work_id
-        
-    def download_it(self, path: str = None) -> dict:
-        """用户实现具体的下载逻辑"""
-        # 用户在这里编写具体的下载代码
-        pass
+    website = "pixiv"
+
+    def __init__(self, work_info: dict, download_path: str, download_info: dict | None): ...
+    def download_it(self) -> str | dict: ...  # 下载入口；把数据写入 download_path；
+        # 返回产物路径（str，或 {path, duration?}）；失败抛异常；
+        # duration（秒）供 waiting_play 使用
 ```
 
-### 更新脚本接口
-```python
-# scripts/update_a_user.py
-class UpdateUser:
-    def __init__(self, user_id: str):
-        self.user_id = user_id
-        self.page = 1
-        self.works = []
-        
-    def get_one_page(self):
-        """用户实现获取一页数据的逻辑"""
-        # 用户在这里编写具体的数据获取代码
-        pass
-        
-    def __iter__(self):
-        return self
-        
-    def __next__(self):
-        # 用户在这里实现迭代逻辑
-        pass
-```
+实例化后框架会注入 `logger`、`config_manager`、`cookie_manager` 属性。登录 cookie 按 website 取用：
+`cookie_manager.get(website)` 返回 cookie 列表（Selenium 兼容格式，可逐条 add_cookie），
+`cookie_manager.get_header(website)` 返回可直接用于 requests 的 Cookie 头字符串；
+未登录时抛 `CookieNotFoundError`。UpdateUser 实例同样被注入 `cookie_manager`。
+
+### 登录 cookie 的获取（登录代理）
+
+cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `websites.yaml` 中该站点的登录页
+**原样代理**给前端（iframe），用户真实登录——代理把整个过程的 Set-Cookie 收进后端会话，
+不依赖浏览器存 cookie；点"完成并保存"落盘为 `datas/cookies/<website>.json`。
+细节见 `src/server/apis/cookie_api.py`（同源 HTML 改写、404 救援、重登刷新）。
+
+## 调度循环
+
+**Updater**（间隔 `update_interval`，±10% 抖动）：查未停止用户 → 按用户提交线程池任务，
+任务间错峰 `commit_interval` → 等待本轮收尾。每轮用户数受 `once_update_number` 限制。
+
+**Downloader（每站点独立调度）**：守护线程周期性发现有待下载作品的站点，为每个站点
+启动独立调度线程——各自独立的线程池（`download_thread`）、轮间隔（`download_interval`，-1
+持续下载）、数量限制（`once_download_number`）、缓存与路径。站点循环内：回收中断残留 →
+按优先级认领本站任务（`state ∈ {inQueue, NULL}`）→ 认领即置 `downloading`，交线程池执行 →
+成功置 `done` 记录 `downloadDate`，异常置 `failed`（不覆盖 `stopped`）→ 轮末等任务收尾。
+站点级配置写在 `download_sites.yaml`（键为 website，未写的键回落全局），支持运行中热更新
+（线程数除外，改动后重启进程或站点线程重建时生效）；全局 `do_download` 是总开关，
+站点级 `do_download: false` 可单独关站，开关恢复后守护线程自动重新拉起。
+
+**下载路径包装**（对脚本屏蔽缓存细节）：脚本只接收一个下载目录 + downloadInfo——
+`use_cache` 开时是缓存中的专属工作目录 `cache_path/<website>_<workNumber>/`，脚本返回
+产物路径后由框架拷贝到最终保存路径 `download_path/<website>/<work>/` 并清理缓存目录
+（缺产物路径视为失败）；`use_cache` 关时脚本直接写最终保存目录。两种模式脚本无感。
+
+两个服务都有 `stop()`：置停止事件（所有 sleep 均为可唤醒的 `Event.wait`）+ 线程池
+`shutdown(wait=True, cancel_futures=True)`，Ctrl+C 时由 main 的信号处理依次调用。
 
 ## 配置系统
 
-### 配置文件位置
-- `assets/confs/global_conf.json` - 全局配置模板
-- `assets/confs/path.json` - 路径配置模板
-- `assets/confs/download_setting.json` - 下载配置模板
-- `assets/confs/update_setting.json` - 更新配置模板
-- `assets/confs/network.json` - 网络配置模板
+- 配置在 `BASEPATH/confs/`，YAML 优先（同名 yaml > yml > json）。模板来自 `src/assets/confs/`，
+  `init_files()` 只补缺失文件，不覆盖已有配置。
+- `ConfigManager`：内存字典 + RLock；`set()` 内存与文件同时更新（临时文件原子替换）；
+  守护线程按 `conf_reload_interval` 定期重载文件。
+- **环境变量覆盖**：`字典名_键名`（大写）命中即覆盖内存值，仅内存生效、不回写文件；
+  每次文件重载后重新应用，保证热重载不丢覆盖。
+- 字符串值中的 `${BASE_PATH}` 占位符在 `get()` 返回时替换为实际工作目录；
+  `database.yaml` 的 `${DB_PATH}` 由 DatabaseManager 替换。
 
-**注意**: 实际运行时，这些配置文件会被复制到用户指定的工作目录（如 `docker/` 目录）
+关键键位（代码与 yaml 已对齐）：
 
-### 配置管理
-- 支持热重载
-- 配置验证
-- 默认值处理
+| 文件 | 键 | 用途 |
+|---|---|---|
+| download_setting | do_download / download_thread | 总开关 / 线程数 |
+| | once_download_number | 每轮数量限制（-1 无限） |
+| | download_interval | 轮间隔（-1 持续下载） |
+| | use_cache | 下载缓存开关（开=缓存中转+框架拷贝到最终路径） |
+| download_sites | `<website>: {键覆盖}` | 每站点独立下载配置，未写键回落全局 |
+| | waiting_play / sleep_second | 任务间节奏 |
+| | download_path / cache_path | 存储路径（支持 ${BASE_PATH}） |
+| update_setting | do_update / update_thread | 总开关 / 线程数 |
+| | update_interval / commit_interval / once_update_number | 轮间隔 / 用户错峰 / 每轮用户数 |
+| network | rest_api_host / rest_api_port | API 监听（当前无鉴权，勿暴露公网） |
+| websites | `<website>: 入口URL` | 各站点域名（登录代理目标、脚本可参考） |
+| global_conf | conf_reload_interval / debug | 配置热重载 / 调试 |
 
-## 技术栈
+## 数据库
 
-### 后端技术
-- **语言**: Python 3.8+
-- **Web框架**: Flask
-- **数据库**: SQLite
-- **任务队列**: 自定义线程池
-- **动态加载**: importlib
-- **浏览器自动化**: Selenium
+- SQLAlchemy 2.0 + SQLite（`database.yaml` 的 `url` 预留了换 Postgres 的写法）。
+- 连接级 PRAGMA：`journal_mode=WAL`（读写互斥降低）、`busy_timeout=30000`（并发写退避）、
+  `foreign_keys=ON`（外键强制）。`echo`、`connect_args` 由 database.yaml 配置。
+- 会话统一走 `DatabaseManager.get_db_session()` 上下文管理器（自动提交/回滚/关闭）。
+  **注意：ORM 对象在会话提交后即过期，跨会话使用需在会话内转字典。**
 
-### 依赖管理
-- `requirements.txt` - Python包依赖
-- 支持虚拟环境
+### Schema 迁移
 
-## 部署说明
+`schema_version` 表记录当前版本。约定：
 
-### 开发环境
-- 后端运行在 `http://localhost:5000`
-- 前端运行在 `http://localhost:3000`
-- 支持CORS跨域请求
+1. 修改 `models.py` 后，新建 `migrations/000N_说明.py`，提供 `apply(engine)`（幂等）；
+2. `database.py` 的 `HEAD_SCHEMA_VERSION` +1。
+全新库由 `create_all` 直接建出最新结构并记为最新版本；旧库按版本号补跑迁移。
 
-### 生产环境
-- 后端可部署到服务器
-- 前端构建后部署到CDN
-- 支持Docker容器化部署
+## REST API
 
-## 扩展性
+| 端点 | 说明 |
+|---|---|
+| POST /api/update/add_pos | 添加发布位点（authorId + website，默认 pixiv） |
+| POST /api/update/stop_pos | 停止追踪位点（state→stopped） |
+| POST /api/download/add_work | 作品入队（可带 downloadInfo 对象） |
+| POST /api/download/stop_work | 停止下载（state→stopped） |
+| POST /api/download/requeue_work | 重新入队（failed/stopped/done → inQueue） |
+| PUT /api/{update,download,global,network}/config | 更新对应配置段 |
+| GET /api/query/works | 组合筛选作品：website/state 多选(none=NULL)/author/日期区间(upTime、downloadDate)/keyword/排序(白名单)/分页 |
+| GET /api/query/positions | 组合筛选位点：website/state/keyword/addTime 区间/分页，附每个位点的作品关联数 |
+| GET /api/query/stats | 按 website × state 计数，供前端生成筛选选项与概览条 |
+| GET /api/cookie/status | 各站点 cookie 存储状态（前端 Cookie 页数据源） |
+| GET /api/cookie/<w>/login_page | 登录包装页（顶栏 + 代理 iframe） |
+| ANY /api/cookie/<w>/proxy/[path] | 登录代理：转发到目标站，捕获 Set-Cookie，HTML 同源改写 |
+| POST /api/cookie/<w>/save | 登录完成，会话 cookie 落盘 |
+| POST /api/cookie/<w>/cancel · DELETE /api/cookie/<w> | 放弃登录会话 · 删除已存 cookie |
+| GET /api/system/scripts · POST /api/system/scripts/reload | 查看脚本路由表 · 热重载用户脚本（失败保留旧路由） |
+| GET /api/system/scripts/<kind>/source · POST /api/system/scripts/upload | 查看脚本内容 · Web 上传脚本（multipart：kind + file；UTF-8/语法校验，保存后自动重载） |
+| GET /api/system/config · GET/PUT /api/system/config/<段>/raw · POST /api/system/config/reload | 列配置段 · 以 YAML 读/写单段（写盘+内存即时生效） · 从文件整体重载 |
 
-### 添加新网站
-1. 在 `scripts/` 目录下编写新的下载和更新脚本
-2. 实现对应的接口
-3. 配置网站特定参数
+统一响应 `{success, message/error, ...}`；主键身份均为 `(id, website)`。
 
-### 添加新功能
-1. 在 `services/` 目录下添加新服务
-2. 在 `api/routes/` 目录下添加新路由
-3. 更新 `BackendManager` 集成新服务
+## 前端
 
-## 注意事项
+`src/server/web/index.html` 单文件单页应用（无框架、无构建），由 REST API 的 `/` 路由同源托管。
+功能：作品/用户双 Tab；顶部按站点×状态的统计条（点击站点名设站点筛选、点击状态 chip 切换状态多选）；
+筛选维度可任意组合——站点、状态多选、作者（经 upload 关联）、日期区间（可选字段）、关键字、排序方向；
+分页与每页大小；作品行内"停止/重新入队"操作（调用对应管理 API）；筛选变更 300ms 防抖自动刷新。
+另有 Cookie 页（登录代理入口与状态）和系统页（脚本路由查看/热重载/Web 上传脚本、
+单段 YAML 配置编辑器、配置整体重载）。位点 Tab 支持在线添加位点（站点选项来自
+`websites.yaml`）和行内"停止追踪"。
 
-1. **用户脚本是核心**：框架只提供基础设施，具体逻辑由用户脚本实现
-2. **单网站专注**：每个项目实例只处理一个网站
-3. **配置驱动**：通过配置文件控制系统行为
-4. **REST API优先**：所有功能都通过API接口暴露
-5. **前后端分离**：前端项目独立开发，通过API与后端通信
+## 初始化与生命周期
+
+```
+main.py (--basepath / BASEPATH)
+  └─ init()
+     ├─ init_files()        # assets 模板补齐工作目录
+     ├─ config_manager.init_config()
+     ├─ logger.init_log()
+     ├─ DatabaseManager.init_database()
+     ├─ rest_api.init()     # 后台线程
+     ├─ updater.init() + start()
+     └─ downloader.init()   # init 内自启调度线程
+SIGINT → downloader.stop() → updater.stop() → rest_api.stop() → ConfigManager.stop_daemon()
+```
+
+## 测试
+
+`tests/`（pytest）：models（外键/复合主键/downloadInfo/关系）、dispatcher（路由/兜底/报错）、
+config（get 语义/占位符/env 覆盖不落盘）、queue（认领排序/状态回写/stopped 保护/崩溃回收/API）、
+migrations（版本戳/幂等/PRAGMA）。运行：`python3 -m pytest tests/`。
+
+## 部署（Docker）
+
+仓库根目录：`Dockerfile`（python:3.12-slim，非 root，STOPSIGNAL SIGINT，自带健康检查）、
+`docker-compose.yml`（数据卷 + 端口 + 1 分钟 stop 宽限）、`.dockerignore`（排除本机 `docker/` 工作目录）。
+
+```bash
+docker compose up -d --build     # 首次启动自动在卷里 bootstrap 配置模板
+# 数据（配置/数据库/cookie/下载文件）全在命名卷 spider-data 的 /data 下，升级镜像不丢
+# 改配置：直接编辑卷内 /data/confs/*.yaml（热重载生效），或 docker cp 后等重载
+# docker stop 会触发 SIGINT 优雅退出，等池内任务收尾（宽限期 compose 里给了 1 分钟）
+```
+
+注意：镜像内不需要 Chrome（`utils/browser/` 未接线，登录走代理）；健康检查固定探测 8300，
+改端口需同步改 compose 和 `/data/confs/network.yaml`。
+
+## 已知未接线 / 待办
+
+- `once_download_size` / `once_download_duration`、`once_update_duration` 配置键存在但无逻辑。
+- 全局统一节奏（线程数、间隔不区分站点）——待工作流稳定后做 per-site 覆盖。
+- `utils/browser/`（Selenium）暂未接线（initer.py 依赖的旧配置键已清理，启用前需重写）；登录代理只改写
+  服务端返回的 HTML 文本，站点若用 JS 拼绝对 URL 跳转或强 CSP，可能需要针对性适配（有 404 Referer 救援兜底）。
+- REST API 无鉴权。

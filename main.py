@@ -6,30 +6,46 @@ import argparse
 
 #from src.core.backendManager import BackendManager
 #from src.initer.init_backend import init_backend
-from src.config.config import config_manager
+from src.config.config import ConfigManager, config_manager
 
 from src.core.initialization import init
 from src.server.rest_api import rest_api
 from src.cli.repl import run_repl
+from src.service.updater import updater
+from src.service.downloader import downloader
 from src.utils.logging.logger import SpiderLogger as logger
 
 def signal_handler(sig, frame):
     """处理 Ctrl+C 信号"""
     print('\n收到中断信号，正在安全退出...')
-    
+
+    # 停止调度服务（等待进行中的任务收尾）
+    for service in (downloader, updater):
+        try:
+            service.stop()
+        except Exception as e:
+            print(f"停止 {type(service).__name__} 时出错: {e}")
+
     # 停止 REST API 服务
     if rest_api:
         try:
             rest_api.stop()
         except Exception as e:
             print(f"停止 REST API 服务时出错: {e}")
-    
+
+    # 停止配置热重载守护线程
+    try:
+        ConfigManager.stop_daemon()
+    except Exception as e:
+        print(f"停止配置守护线程时出错: {e}")
+
     # 退出程序
     sys.exit(0)
 
 def main(base_path: str=None):
-    # 注册信号处理器
+    # 注册信号处理器（SIGTERM：docker stop 默认信号；SIGINT：Ctrl+C）
     signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # 只在 main 里配置一次：BASEPATH / --basepath -> 写入 config_manager.base_path
     if base_path:
@@ -50,6 +66,7 @@ def main(base_path: str=None):
 def main_with_repl(base_path: str | None = None) -> None:
     # 复用 main 的启动流程，但把“阻塞 loop”替换成 REPL
     signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     if base_path:
         config_manager.base_path = base_path
 

@@ -1,0 +1,17 @@
+services:
+  spider:
+    build: .
+    image: spiderscheduler
+    container_name: spiderscheduler
+    ports:
+      # 左侧宿主端口按需调整；改端口需同步 /data/confs/network.yaml 的 rest_api_port
+      - "8300:8300"
+    volumes:
+      # 全部运行数据（配置/数据库/cookie/下载文件）都在这个卷里
+      - spider-data:/data
+    # 优雅退出要等线程池任务收尾，放宽 docker stop 的宽限期
+    stop_grace_period: 1m
+    restart: unless-stopped
+
+volumes:
+  spider-data:

@@ -1,0 +1,21 @@
+# 运行数据目录与仓库同名（docker/ 是本机工作目录），绝不能进镜像
+docker/
+
+# 与运行无关的内容
+old_code/
+tests/
+.git/
+.github/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.log
+*.db
+*.db.bak-*
+.DS_Store
+.vscode/
+.idea/
+Dockerfile
+docker-compose.yml
+.dockerignore

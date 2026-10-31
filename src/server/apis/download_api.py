@@ -1,3 +1,4 @@
+import json
 from flask import Blueprint, request, jsonify
 from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
@@ -102,38 +103,52 @@ class DownloadApi:
                 
                 # 转换为字符串
                 work_number = str(work_number)
-                
+
+                # 站点标识：与 (workNumber, website) 联合主键配套，默认 pixiv，与 REPL 一致
+                website = str(data.get('website') or 'pixiv').strip() or 'pixiv'
+
+                # downloadInfo：统一下载参数，接受 JSON 字符串或任意可序列化对象，统一以 JSON 文本入库
+                download_info = data.get('downloadInfo') or data.get('download_info')
+                if isinstance(download_info, (dict, list)):
+                    download_info = json.dumps(download_info, ensure_ascii=False)
+                elif download_info is not None:
+                    download_info = str(download_info)
+
                 # 使用ORM添加作品到数据库
                 with DatabaseManager.get_db_session() as session:
-                    # 检查作品是否已存在
-                    existing_work = session.query(Works).filter_by(workNumber=work_number).first()
+                    # 检查作品是否已存在（同一 workNumber 可存在于不同 website）
+                    existing_work = session.query(Works).filter_by(workNumber=work_number, website=website).first()
                     if existing_work:
                         return jsonify({
                             'success': False,
-                            'error': f'作品 {work_number} 已存在',
-                            'work_number': work_number
+                            'error': f'作品 {work_number}@{website} 已存在',
+                            'work_number': work_number,
+                            'website': website
                         }), 400
-                    
-                    # 创建新作品，只设置 workNumber，其他字段使用默认值
+
+                    # 创建新作品，只设置 workNumber/website，其他字段使用默认值
                     new_work = Works(
                         workNumber=work_number,
+                        website=website,
                         upTime="",
                         title=None,
                         kind=None,
                         state="inQueue",  # 默认状态为 inQueue
                         downloadDate=None,
-                        downloadPriority=0
+                        downloadPriority=0,
+                        downloadInfo=download_info
                     )
-                    
+
                     # 添加到会话
                     session.add(new_work)
                     # get_db_session 会自动提交
-                
-                logger.info(f"成功添加作品到下载队列: {work_number}")
+
+                logger.info(f"成功添加作品到下载队列: {work_number}@{website}")
                 return jsonify({
                     'success': True,
                     'message': '作品添加成功',
-                    'work_number': work_number
+                    'work_number': work_number,
+                    'website': website
                 }), 201
                 
             except Exception as e:
@@ -166,35 +181,96 @@ class DownloadApi:
                 
                 # 转换为字符串
                 work_number = str(work_number)
-                
+
+                # 站点标识：与 (workNumber, website) 联合主键配套，默认 pixiv，与 REPL 一致
+                website = str(data.get('website') or 'pixiv').strip() or 'pixiv'
+
                 # 使用ORM更新作品状态
                 with DatabaseManager.get_db_session() as session:
                     # 查找作品
-                    work = session.query(Works).filter_by(workNumber=work_number).first()
+                    work = session.query(Works).filter_by(workNumber=work_number, website=website).first()
                     if not work:
                         return jsonify({
                             'success': False,
-                            'error': f'作品 {work_number} 不存在'
+                            'error': f'作品 {work_number}@{website} 不存在'
                         }), 404
-                    
+
                     # 更新状态为 stopped
                     work.state = "stopped"
                     # get_db_session 会自动提交
-                
-                logger.info(f"成功停止作品下载: {work_number}")
+
+                logger.info(f"成功停止作品下载: {work_number}@{website}")
                 return jsonify({
                     'success': True,
                     'message': '作品下载已停止',
                     'work_number': work_number,
+                    'website': website,
                     'state': 'stopped'
                 }), 200
-                
+
             except Exception as e:
                 logger.error(f"停止作品下载失败: {e}")
                 return jsonify({
                     'success': False,
                     'error': f'停止作品下载失败: {str(e)}'
-                }), 500   
+                }), 500
+
+        #把作品重新排回下载队列（failed/stopped/done 均可重排，重排后状态为 inQueue）
+        @self.blueprint.route('/requeue_work', methods=['POST'])
+        def requeue_work():
+            """重新入队指定作品"""
+            try:
+                # 获取请求数据
+                data = request.get_json()
+                if not data:
+                    return jsonify({
+                        'success': False,
+                        'error': '请求体不能为空'
+                    }), 400
+
+                # 获取作品ID
+                work_number = data.get('workNumber') or data.get('work_number') or data.get('work_id')
+                if not work_number:
+                    return jsonify({
+                        'success': False,
+                        'error': '缺少作品ID (workNumber/work_number/work_id)'
+                    }), 400
+
+                # 转换为字符串
+                work_number = str(work_number)
+
+                # 站点标识：与 (workNumber, website) 联合主键配套，默认 pixiv，与 REPL 一致
+                website = str(data.get('website') or 'pixiv').strip() or 'pixiv'
+
+                # 使用ORM更新作品状态
+                with DatabaseManager.get_db_session() as session:
+                    # 查找作品
+                    work = session.query(Works).filter_by(workNumber=work_number, website=website).first()
+                    if not work:
+                        return jsonify({
+                            'success': False,
+                            'error': f'作品 {work_number}@{website} 不存在'
+                        }), 404
+
+                    # 重新入队
+                    work.state = "inQueue"
+                    # get_db_session 会自动提交
+
+                logger.info(f"作品已重新入队: {work_number}@{website}")
+                return jsonify({
+                    'success': True,
+                    'message': '作品已重新入队',
+                    'work_number': work_number,
+                    'website': website,
+                    'state': 'inQueue'
+                }), 200
+
+            except Exception as e:
+                logger.error(f"作品重新入队失败: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': f'作品重新入队失败: {str(e)}'
+                }), 500
 
 
                 

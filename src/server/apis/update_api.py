@@ -3,7 +3,7 @@ from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
 from src.config.config import GetUnknownKey
 from src.utils.database.database import DatabaseManager
-from src.utils.database.models import User
+from src.utils.database.models import PublishPos
 from datetime import datetime
 
 
@@ -80,10 +80,10 @@ class UpdateApi:
                     'error': f'更新配置失败: {str(e)}'
                 }), 500
 
-        #增加一个监听用户，不知道的列先空着就行
-        @self.blueprint.route('/add_user', methods=['POST'])
-        def add_user():
-            """添加监听用户"""
+        #增加一个发布位点，不知道的列先空着就行
+        @self.blueprint.route('/add_pos', methods=['POST'])
+        def add_pos():
+            """添加发布位点"""
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -93,56 +93,63 @@ class UpdateApi:
                         'error': '请求体不能为空'
                     }), 400
                 
-                # 获取用户ID
-                user_id = data.get('userId') or data.get('user_id') or data.get('uid')
-                if not user_id:
+                # 获取作者ID
+                author_id = data.get('authorId') or data.get('author_id') or data.get('uid')
+                if not author_id:
                     return jsonify({
                         'success': False,
-                        'error': '缺少用户ID (userId/user_id/uid)'
+                        'error': '缺少作者ID (authorId/author_id/uid)'
                     }), 400
-                
+
                 # 转换为字符串
-                user_id = str(user_id)
-                
-                # 使用ORM添加用户到数据库
+                author_id = str(author_id)
+
+                # 站点标识：与 (authorId, website) 联合主键配套，默认 pixiv，与 REPL 一致
+                website = str(data.get('website') or 'pixiv').strip() or 'pixiv'
+
+                # 使用ORM添加发布位点
                 with DatabaseManager.get_db_session() as session:
-                    # 检查用户是否已存在
-                    existing_user = session.query(User).filter_by(userId=user_id).first()
-                    if existing_user:
+                    # 检查位点是否已存在（同一 authorId 可存在于不同 website）
+                    existing_pos = session.query(PublishPos).filter_by(authorId=author_id, website=website).first()
+                    if existing_pos:
                         return jsonify({
                             'success': False,
-                            'error': f'用户 {user_id} 已存在',
-                            'user_id': user_id
+                            'error': f'位点 {author_id}@{website} 已存在',
+                            'author_id': author_id,
+                            'website': website
                         }), 400
-                    
-                    # 创建新用户，只设置 userId，其他字段先空着
-                    new_user = User(
-                        userId=user_id,
-                        addTime=None  # 先空着，或者可以设置为当前时间: datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                    # 创建新位点
+                    new_pos = PublishPos(
+                        authorId=author_id,
+                        website=website,
+                        addTime=datetime.now().isoformat(timespec='seconds'),
+                        state="inQueue"
                     )
-                    
+
                     # 添加到会话
-                    session.add(new_user)
+                    session.add(new_pos)
                     # get_db_session 会自动提交
-                
-                logger.info(f"成功添加监听用户: {user_id}")
+
+                logger.info(f"成功添加发布位点: {author_id}@{website}")
                 return jsonify({
                     'success': True,
-                    'message': '用户添加成功',
-                    'user_id': user_id
+                    'message': '位点添加成功',
+                    'author_id': author_id,
+                    'website': website
                 }), 201
-                
+
             except Exception as e:
-                logger.error(f"添加用户失败: {e}")
+                logger.error(f"添加位点失败: {e}")
                 return jsonify({
                     'success': False,
-                    'error': f'添加用户失败: {str(e)}'
+                    'error': f'添加位点失败: {str(e)}'
                 }), 500
 
-        #停止对某个用户的监听，通过将state设置为stopped
-        @self.blueprint.route('/stop_user', methods=['POST'])
-        def stop_user():
-            """停止监听指定用户"""
+        #停止对某个发布位点的追踪，通过将state设置为stopped
+        @self.blueprint.route('/stop_pos', methods=['POST'])
+        def stop_pos():
+            """停止追踪指定发布位点"""
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -152,42 +159,103 @@ class UpdateApi:
                         'error': '请求体不能为空'
                     }), 400
                 
-                # 获取用户ID
-                user_id = data.get('userId') or data.get('user_id') or data.get('uid')
-                if not user_id:
+                # 获取作者ID
+                author_id = data.get('authorId') or data.get('author_id') or data.get('uid')
+                if not author_id:
                     return jsonify({
                         'success': False,
-                        'error': '缺少用户ID (userId/user_id/uid)'
+                        'error': '缺少作者ID (authorId/author_id/uid)'
                     }), 400
-                
+
                 # 转换为字符串
-                user_id = str(user_id)
-                
-                # 使用ORM更新用户状态
+                author_id = str(author_id)
+
+                # 站点标识：与 (authorId, website) 联合主键配套，默认 pixiv，与 REPL 一致
+                website = str(data.get('website') or 'pixiv').strip() or 'pixiv'
+
+                # 使用ORM更新位点状态
                 with DatabaseManager.get_db_session() as session:
-                    # 查找用户
-                    user = session.query(User).filter_by(userId=user_id).first()
-                    if not user:
+                    # 查找位点
+                    pos = session.query(PublishPos).filter_by(authorId=author_id, website=website).first()
+                    if not pos:
                         return jsonify({
                             'success': False,
-                            'error': f'用户 {user_id} 不存在'
+                            'error': f'位点 {author_id}@{website} 不存在'
                         }), 404
-                    
+
                     # 更新状态为 stopped
-                    user.state = "stopped"
+                    pos.state = "stopped"
                     # get_db_session 会自动提交
-                
-                logger.info(f"成功停止监听用户: {user_id}")
+
+                logger.info(f"成功停止追踪位点: {author_id}@{website}")
                 return jsonify({
                     'success': True,
-                    'message': '用户监听已停止',
-                    'user_id': user_id,
+                    'message': '位点追踪已停止',
+                    'author_id': author_id,
+                    'website': website,
                     'state': 'stopped'
                 }), 200
-                
+
             except Exception as e:
-                logger.error(f"停止监听用户失败: {e}")
+                logger.error(f"停止追踪位点失败: {e}")
                 return jsonify({
                     'success': False,
-                    'error': f'停止监听用户失败: {str(e)}'
+                    'error': f'停止追踪位点失败: {str(e)}'
+                }), 500
+
+        #恢复对某个发布位点的追踪（stopped -> inQueue）
+        @self.blueprint.route('/resume_pos', methods=['POST'])
+        def resume_pos():
+            """恢复追踪指定发布位点"""
+            try:
+                # 获取请求数据
+                data = request.get_json()
+                if not data:
+                    return jsonify({
+                        'success': False,
+                        'error': '请求体不能为空'
+                    }), 400
+
+                # 获取作者ID
+                author_id = data.get('authorId') or data.get('author_id') or data.get('uid')
+                if not author_id:
+                    return jsonify({
+                        'success': False,
+                        'error': '缺少作者ID (authorId/author_id/uid)'
+                    }), 400
+
+                # 转换为字符串
+                author_id = str(author_id)
+
+                # 站点标识：与 (authorId, website) 联合主键配套，默认 pixiv，与 REPL 一致
+                website = str(data.get('website') or 'pixiv').strip() or 'pixiv'
+
+                # 使用ORM更新位点状态
+                with DatabaseManager.get_db_session() as session:
+                    # 查找位点
+                    pos = session.query(PublishPos).filter_by(authorId=author_id, website=website).first()
+                    if not pos:
+                        return jsonify({
+                            'success': False,
+                            'error': f'位点 {author_id}@{website} 不存在'
+                        }), 404
+
+                    # 更新状态为 inQueue
+                    pos.state = "inQueue"
+                    # get_db_session 会自动提交
+
+                logger.info(f"成功恢复追踪位点: {author_id}@{website}")
+                return jsonify({
+                    'success': True,
+                    'message': '位点追踪已恢复',
+                    'author_id': author_id,
+                    'website': website,
+                    'state': 'inQueue'
+                }), 200
+
+            except Exception as e:
+                logger.error(f"恢复追踪位点失败: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': f'恢复追踪位点失败: {str(e)}'
                 }), 500

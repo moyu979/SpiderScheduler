@@ -1,6 +1,7 @@
 import threading
+from pathlib import Path
 from typing import Optional
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.serving import make_server
 from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
@@ -8,6 +9,9 @@ from src.server.apis.download_api import DownloadApi
 from src.server.apis.global_api import GlobalApi
 from src.server.apis.update_api import UpdateApi
 from src.server.apis.network_api import NetworkApi
+from src.server.apis.query_api import QueryApi
+from src.server.apis.cookie_api import CookieApi
+from src.server.apis.system_api import SystemApi
 
 class RestApiService:
     """REST API 服务类"""
@@ -17,6 +21,8 @@ class RestApiService:
         
         # 创建 Flask 应用
         self.app = Flask(__name__)
+        # 上传保护：脚本/表单请求体上限
+        self.app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
         
         # 获取配置
         self.host = ConfigManager.get('network', 'rest_api_host')
@@ -28,11 +34,22 @@ class RestApiService:
         
         # 注册所有 API 模块
         self._register_apis()
-        
+
+        # 托管前端单页应用
+        self._register_web()
+
         # 注册全局错误处理
         self._register_error_handlers()
-        
+
         logger.info("REST API 服务初始化完成")
+
+    def _register_web(self):
+        """托管前端单页应用（src/server/web/index.html），与 API 同源无需 CORS"""
+        web_dir = Path(__file__).resolve().parent / "web"
+
+        @self.app.route("/")
+        def index():
+            return send_from_directory(web_dir, "index.html")
     
     def _register_apis(self):
         """注册所有 API 模块"""
@@ -41,13 +58,19 @@ class RestApiService:
         global_api = GlobalApi()
         update_api = UpdateApi()
         network_api = NetworkApi()
-        
+        query_api = QueryApi()
+        cookie_api = CookieApi()
+        system_api = SystemApi()
+
         # 注册蓝图
         self.app.register_blueprint(download_api.blueprint)
         self.app.register_blueprint(global_api.blueprint)
         self.app.register_blueprint(update_api.blueprint)
         self.app.register_blueprint(network_api.blueprint)
-        
+        self.app.register_blueprint(query_api.blueprint)
+        self.app.register_blueprint(cookie_api.blueprint)
+        self.app.register_blueprint(system_api.blueprint)
+
         logger.info("所有 API 模块已注册")
     
     def _register_error_handlers(self):
@@ -55,6 +78,14 @@ class RestApiService:
         
         @self.app.errorhandler(404)
         def not_found(error):
+            # 登录代理页里 JS 发出的根相对请求（fetch('/x')）会落到本应用 404；
+            # 若来自代理页，重定向回代理路径救回来
+            referer = request.headers.get('Referer', '')
+            marker = '/api/cookie/'
+            if marker in referer:
+                website = referer.split(marker, 1)[1].split('/', 1)[0]
+                from flask import redirect
+                return redirect(f"{marker}{website}/proxy{request.path}", code=302)
             return jsonify({
                 'success': False,
                 'error': 'API 端点不存在',

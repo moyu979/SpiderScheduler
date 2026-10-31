@@ -1,3 +1,11 @@
+"""
+Selenium 登录辅助（未接线的历史代码）
+
+注意：本模块依赖的 network.yaml 键（cookie_file/domain/chrome_path/use_cookie）已随
+单站假设一起清理，cookie 获取现由登录代理（src/server/apis/cookie_api.py）承担。
+若要重新启用浏览器能力，需先按多站点约定重写此处，再把依赖的配置键加回。
+"""
+
 import os
 import pickle
 

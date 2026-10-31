@@ -1,9 +1,9 @@
 
-# 示例（SQLite）：sqlite:///./docker/datas/spider.db
-# 示例（Postgres）：postgresql+psycopg2://user:password@127.0.0.1:5432/spider
-# 约定：使用环境变量占位符（需在配置加载层做变量替换）
+# sqlite 文件库不需要配置 url（默认使用 BASEPATH/datas/spider.db 的绝对路径）。
+# 如需使用其他数据库，填写完整连接串，例如：
+#   Postgres：postgresql+psycopg2://user:password@127.0.0.1:5432/spider
 # BASE_PATH 默认可约定为 ./docker
-url: "sqlite:///./${DB_PATH}"
+url: ""
 
   # 透传给 SQLAlchemy create_engine 的参数（按需调整）
 echo: true

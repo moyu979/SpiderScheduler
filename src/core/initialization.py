@@ -56,10 +56,10 @@ def init():
     init_rest_api()
 
     # 6. 初始化更新器
-    # init_updater()
+    init_updater()
 
     # 7. 初始化下载器
-    # init_downloader()
+    init_downloader()
 
-    # 5. 记录完成
+    # 8. 记录完成
     logger.info("初始化后端系统完成")

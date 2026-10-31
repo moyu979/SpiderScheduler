@@ -1,0 +1,4 @@
+# 各站点的入口地址：登录代理的目标域名，也是脚本访问站点的基础 URL
+# 键名与数据库里的 website 字段一致
+pixiv: "https://www.pixiv.net"
+# danbooru: "https://danbooru.donmai.us"

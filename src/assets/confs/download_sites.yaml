@@ -1,0 +1,14 @@
+# 各站点独立的下载配置：键为 website，值为该站点生效的配置覆盖。
+# 未写出的键回落 download_setting.yaml 的全局值；全局 do_download 是总开关，
+# 站点级可用 do_download: false 单独关闭某站点（恢复后自动重新拉起）。
+#
+# 可覆盖的键：do_download / download_thread / once_download_number / download_interval /
+#             waiting_play / sleep_second / use_cache / download_path / cache_path
+#
+# 示例：
+# pixiv:
+#   download_thread: 2
+#   sleep_second: 8
+#   download_interval: 3600
+# danbooru:
+#   do_download: false

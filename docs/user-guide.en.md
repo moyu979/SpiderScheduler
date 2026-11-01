@@ -99,10 +99,13 @@ Scripts consume cookies via the injected `cookie_manager` (see §4).
 - **User scripts**: shows the current route table (`site → class`, plus the fallback class).
   After editing scripts in the work directory, click **Reload scripts**; broken scripts keep
   the old routes with the reason shown in red.
-- **Upload scripts**: two upload rows (download / update script). UTF-8 and syntax validation
-  run before saving (syntax errors are rejected and the original file is untouched); the
-  dispatcher reloads automatically. Dependencies declared via `# requirements:` are installed
-  automatically.
+- **Upload scripts**: pick a kind (download / update), a file name and a .py file. Scripts use
+  **multi-file dispatch**: `scripts/<kind>/<name>.py`, one file per site, routes merged across
+  files. UTF-8/syntax validation runs first, then two conflict checks — a file with the same
+  name, or a website already declared by another script — return 409 and **the UI asks whether
+  to overwrite** (confirmed with force); **after a successful save the dispatcher is rescanned
+  immediately**, so new files take effect at once; on rescan failure old routes stay active.
+  The file list supports viewing and deleting online (delete rescans too).
 - **Config editor**: pick any section (e.g. `download_setting`, `websites`), edit it as YAML;
   saving writes to disk and takes effect in memory immediately. "Reload all from files"
   forces a full config reload.
@@ -143,11 +146,42 @@ danbooru:
 Note: `download_thread` is read when a site's scheduler thread starts — restart the process
 after changing it; every other key hot-applies.
 
+### 3.2.1 Download Window (burst-burn proxy traffic)
+
+Each site can define *when* downloading is allowed — outside the window the site's scheduler
+thread idles quietly (re-evaluated every 60 s) and starts grabbing the moment the window
+opens. Three modes (`start`/`end` are HH:MM, overnight ranges like 22:00-06:00 are supported):
+
+| mode | Meaning | Extra keys |
+|---|---|---|
+| `daily` | same time range every day | — |
+| `weekly` | range on chosen weekdays | `weekdays: [1, 5]` (1=Mon…7=Sun) |
+| `monthly` | range on chosen days of month | `month_days: [1, 2, -1]` (negatives count from month end, -1=last day) |
+
+Recommended recipe for burning proxy traffic (full speed inside the window):
+
+```yaml
+# download_sites.yaml
+pixiv:
+  download_window:
+    mode: monthly          # the 1st, 2nd and last day of each month
+    month_days: [1, 2, -1]
+  once_download_number: -1   # unlimited
+  download_interval: -1      # continuous
+  sleep_second: 0            # no pause between tasks
+```
+
+Details: no new tasks are claimed outside the window; in-flight tasks finish naturally. No
+window configured = unrestricted. Invalid config (bad time format, weekly without weekdays,
+monthly without month_days) **fails open** with a warning — it never silently stops your
+downloads.
+
 ### 3.3 Other Sections
 
 | Section | Keys |
 |---|---|
-| `update_setting` | `do_update` master switch, `update_thread`, `update_interval`, `once_update_number`, `commit_interval` (stagger between positions) |
+| `update_setting` | `do_update` master switch, `update_thread`, `update_interval`, `commit_interval` (stagger) — global defaults |
+| `update_sites` | `<website>: {key overrides}` | per-site update config (updates crawl the target site too — rate-limit per site) |
 | `websites` | `<website>: entry URL` — target of the login proxy and source of site dropdowns |
 | `network` | `rest_api_host` / `rest_api_port`, proxy settings |
 | `global_conf` | `conf_reload_interval`, `debug` |
@@ -179,9 +213,9 @@ from dropdowns, add its entry URL to `websites.yaml` on the System tab first.
 ## 5. Download Cache
 
 - `use_cache: true`: the script receives a dedicated cache directory
-  `cache_path/<site>_<work>/`; after `download_it()` returns the payload path, the framework
-  **copies** it to the final location `download_path/<site>/<work>/` and removes the cache
-  directory.
+  `cache_path/<site>/<work>/`; after `download_it()` returns the payload path, the framework
+  **copies** it to the final location `download_path/<site>/<work>/` and removes the per-work
+  cache directory.
 - `use_cache: false`: the script writes the final directory directly, no staging.
 - Script code is identical in both modes; toggling the switch requires no script changes.
 

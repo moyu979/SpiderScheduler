@@ -89,8 +89,11 @@ docker/                          ← BASEPATH
 
 - **用户脚本**：显示当前脚本路由表（`站点 → 类名`，以及兜底类）。改完工作目录里的脚本后点
   **重载脚本**即时生效；脚本有问题时保留旧路由并标红原因。
-- **上传脚本**：两行上传控件（下载脚本/更新脚本）。保存前会做 UTF-8 与语法校验（语法错误
-  拒收且不覆盖原文件），保存后自动重载。头部 `# requirements:` 声明的依赖会自动安装。
+- **上传脚本**：选择种类（下载/更新）+ 文件名 + .py 文件上传。脚本采用**多文件分发**：
+  `scripts/<种类>/<文件名>.py` 每站点一个文件，路由跨文件合并。上传前做 UTF-8/语法校验，
+  并检测两级冲突——同名文件已存在、website 与其他脚本重复——返回 409 并**询问是否覆盖**
+  （确认后带 force 重传）；**保存成功后自动重新扫描分发器**，新文件即刻生效，扫描失败
+  保留旧路由并标红原因。文件列表支持在线查看与删除（删除后同样重扫）。
 - **配置编辑**：下拉选择任意配置段（如 `download_setting`、`websites`），以 YAML 直接编辑，
   保存即写盘并在内存即时生效；"从文件重载全部"等效一次手动热重载。
 
@@ -108,6 +111,8 @@ docker/                          ← BASEPATH
 | `download_thread` | 全局默认下载线程数（每站点可覆盖） | 1 |
 | `once_download_number` | 每站点每轮下载数量上限，-1 无限 | -1 |
 | `download_interval` | 每站点轮间隔秒数，-1 = 持续下载 | -1 |
+| `site_scan_interval` | 站点巡检周期秒数（新作品入队到开始下载的发现延迟） | 5 |
+| `window_check_interval` | 可下载窗口外的轮询周期秒数（开窗后最多延迟该时长进场） | 60 |
 | `waiting_play` | true 时按脚本返回的 duration 模拟播放时长 | false |
 | `sleep_second` | 任务间定长睡眠秒数 | 10 |
 | `use_cache` | 缓存开关（见 §5 下载缓存） | true |
@@ -129,11 +134,40 @@ danbooru:
 
 注意：`download_thread` 在站点线程创建时生效，改动需重启进程；其余键热生效。
 
+### 3.2.1 可下载时间窗口（突击消耗代理流量）
+
+每个站点可以配置"什么时间允许下载"——窗口外该站点的调度线程静默等待（60 秒周期重新
+评估），窗口一到立即开抢。三种模式（`start`/`end` 为 HH:MM，支持跨天如 22:00-06:00）：
+
+| mode | 含义 | 专属键 |
+|---|---|---|
+| `daily` | 每天的固定时段 | — |
+| `weekly` | 每周指定星期的时段 | `weekdays: [1, 5]`（1=周一…7=周日） |
+| `monthly` | 每月指定日期的时段 | `month_days: [1, 2, -1]`（负数=倒数第几天，-1=最后一天） |
+
+"突击消耗代理流量"的推荐配方（窗口内全速、不限量）：
+
+```yaml
+# download_sites.yaml
+pixiv:
+  download_window:
+    mode: monthly          # 每月 1、2 号和最后一天
+    month_days: [1, 2, -1]
+  once_download_number: -1   # 不限量
+  download_interval: -1      # 不间断
+  sleep_second: 0            # 任务间不休眠
+```
+
+细节：窗口外不认领新任务，进行中的任务会自然完成后停止；未配置窗口 = 不限制；
+配置非法（时间格式错、weekly 缺 weekdays、monthly 缺 month_days）时**放行**并记警告，
+不会静默停掉你的下载。
+
 ### 3.3 其他配置段
 
 | 段 | 关键键 |
 |---|---|
-| `update_setting` | `do_update` 总开关、`update_thread`、`update_interval`（轮间隔）、`once_update_number`、`commit_interval`（位点间错峰） |
+| `update_setting` | `do_update` 总开关、`update_thread`、`update_interval`（轮间隔）、`commit_interval`（位点间错峰）——均为全局默认 |
+| `update_sites` | `<website>: {键覆盖}` | 每站点独立更新配置（查更新也是爬页面，按站点限流） |
 | `websites` | `<website>: 入口 URL`——登录代理的目标、站点下拉的选项来源 |
 | `network` | `rest_api_host` / `rest_api_port`、代理设置 |
 | `global_conf` | `conf_reload_interval`（热重载周期）、`debug` |
@@ -163,9 +197,9 @@ class DownloadWork:
 
 ## 5. 下载缓存机制
 
-- `use_cache: true`：脚本拿到的是缓存中的专属目录 `cache_path/<站点_作品号>/`；
+- `use_cache: true`：脚本拿到的是缓存中的专属目录 `cache_path/<站点>/<作品号>/`；
   `download_it()` 返回产物路径后，框架把产物**拷贝**到最终路径
-  `download_path/<站点>/<站点_作品号>/`，然后清理该缓存目录。
+  `download_path/<站点>/<作品号>/`，然后清理该作品缓存目录（站点目录保留）。
 - `use_cache: false`：脚本直接写最终保存目录，无中转。
 - 两种模式脚本代码完全一致，切换开关不改脚本。
 

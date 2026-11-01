@@ -19,7 +19,7 @@ SpiderScheduler/
 │   │   └── paths.py                 # BASEPATH 下的各类路径
 │   ├── server/
 │   │   ├── rest_api.py              # Flask 服务（werkzeug make_server，后台线程，可优雅停止；托管前端页）
-│   │   ├── apis/                    # download_api / update_api / global_api / network_api / query_api（蓝图）
+│   │   ├── apis/                    # download / update / global / network / query / cookie / script / config（8 个蓝图）
 │   │   └── web/index.html           # 前端单页应用（vanilla JS，无构建依赖，/ 路由直接托管）
 │   ├── service/
 │   │   ├── updater.py               # 更新调度：定期遍历发布位点 → UpdateUser 脚本 → 写 Works/Upload
@@ -82,6 +82,11 @@ publish_pos（发布位点）       works                          upload
 
 脚本放在 `BASEPATH/scripts/`，由框架动态加载。**website 路由约定**：
 
+- 多文件分发：`scripts/download/`、`scripts/update/` 目录下**每站点一个文件**
+  （如 `pixiv.py`），路由跨文件合并——同一站点重复声明时先加载的生效并告警；
+  无 website 声明的文件可作为兜底（至多一个，传统单文件优先）。来源列表每次
+  load 重新求值：旧的单文件（`download_a_work.py` 等）保持兼容且优先级最高，
+  新上传的文件在**重新扫描后立即生效**；
 - 依赖自描述：脚本头部可写 `# requirements: 包名[版本约束]`（可多行、逗号分隔），
   框架在每次加载前检测缺失并自动 `pip install` 到当前环境，之后才执行脚本顶部的
   import；安装失败仅记录日志，不阻断加载（导入错误会自然暴露）；
@@ -134,8 +139,11 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 
 ## 调度循环
 
-**Updater**（间隔 `update_interval`，±10% 抖动）：查未停止用户 → 按用户提交线程池任务，
-任务间错峰 `commit_interval` → 等待本轮收尾。每轮用户数受 `once_update_number` 限制。
+**Updater（每站点独立调度，与 Downloader 对称）**：守护线程周期性发现有未停止位点的
+站点，为每个站点启动独立调度线程——各自的线程池（`update_thread`）、轮间隔
+（`update_interval`，±10% 抖动，-1 持续更新）、位点间错峰（`commit_interval`）与站点开关
+（`do_update`）。查更新本身也是爬目标站页面，因此按站点限流；站点级配置写在
+`update_sites.yaml`（键为 website，未写的键回落全局）；全局 `do_update` 是总开关。
 
 **Downloader（每站点独立调度）**：守护线程周期性发现有待下载作品的站点，为每个站点
 启动独立调度线程——各自独立的线程池（`download_thread`）、轮间隔（`download_interval`，-1
@@ -145,11 +153,19 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 站点级配置写在 `download_sites.yaml`（键为 website，未写的键回落全局），支持运行中热更新
 （线程数除外，改动后重启进程或站点线程重建时生效）；全局 `do_download` 是总开关，
 站点级 `do_download: false` 可单独关站，开关恢复后守护线程自动重新拉起。
+每站点还可配 **可下载时间窗口** `download_window`（mode: daily/weekly/monthly，start/end
+HH:MM 支持跨天，weekdays: 1=周一..7=周日，month_days 支持负数 -1=当月最后一天）：窗口外
+站点循环按 60s 周期静默等待（状态切换才打日志），窗口开启后立即调度；未配置或配置非法
+一律放行（fail-open）。配合 `once_download_number: -1` 与 `download_interval: -1` 可实现
+窗口内全速突击消耗代理流量。
 
 **下载路径包装**（对脚本屏蔽缓存细节）：脚本只接收一个下载目录 + downloadInfo——
-`use_cache` 开时是缓存中的专属工作目录 `cache_path/<website>_<workNumber>/`，脚本返回
-产物路径后由框架拷贝到最终保存路径 `download_path/<website>/<work>/` 并清理缓存目录
-（缺产物路径视为失败）；`use_cache` 关时脚本直接写最终保存目录。两种模式脚本无感。
+目录层级由调度器组装为 `<路径根>/<website>/<workNumber>/`（每站点一个目录，
+作品子目录按站点内编号，编号过滤文件系统不安全字符）：`use_cache` 开时脚本拿到
+`cache_path/<website>/<workNumber>/`，返回产物路径后框架拷贝到最终保存路径
+`download_path/<website>/<workNumber>/` 并清理该作品缓存目录（缺产物路径视为失败）；
+`use_cache` 关时脚本直接写最终目录。两种模式脚本无感。路径根可经
+`download_sites.yaml` 按站点覆盖。
 
 两个服务都有 `stop()`：置停止事件（所有 sleep 均为可唤醒的 `Event.wait`）+ 线程池
 `shutdown(wait=True, cancel_futures=True)`，Ctrl+C 时由 main 的信号处理依次调用。
@@ -174,10 +190,13 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 | | download_interval | 轮间隔（-1 持续下载） |
 | | use_cache | 下载缓存开关（开=缓存中转+框架拷贝到最终路径） |
 | download_sites | `<website>: {键覆盖}` | 每站点独立下载配置，未写键回落全局 |
+| update_sites | `<website>: {键覆盖}` | 每站点独立更新配置（线程/间隔/错峰/站点开关） |
+| （download_setting/download_sites） | `download_window` | 每站点可下载时间窗口（daily/weekly/monthly + start/end/weekdays/month_days） |
+| download_setting | `site_scan_interval` / `window_check_interval` | 站点巡检周期（新站点发现延迟）/ 窗口外检查周期（开窗进场延迟），单位秒 |
 | | waiting_play / sleep_second | 任务间节奏 |
 | | download_path / cache_path | 存储路径（支持 ${BASE_PATH}） |
 | update_setting | do_update / update_thread | 总开关 / 线程数 |
-| | update_interval / commit_interval / once_update_number | 轮间隔 / 用户错峰 / 每轮用户数 |
+| | update_interval / commit_interval | 轮间隔 / 位点间错峰 |
 | network | rest_api_host / rest_api_port | API 监听（当前无鉴权，勿暴露公网） |
 | websites | `<website>: 入口URL` | 各站点域名（登录代理目标、脚本可参考） |
 | global_conf | conf_reload_interval / debug | 配置热重载 / 调试 |
@@ -217,7 +236,9 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 | POST /api/cookie/<w>/save | 登录完成，会话 cookie 落盘 |
 | POST /api/cookie/<w>/cancel · DELETE /api/cookie/<w> | 放弃登录会话 · 删除已存 cookie |
 | GET /api/system/scripts · POST /api/system/scripts/reload | 查看脚本路由表 · 热重载用户脚本（失败保留旧路由） |
-| GET /api/system/scripts/<kind>/source · POST /api/system/scripts/upload | 查看脚本内容 · Web 上传脚本（multipart：kind + file；UTF-8/语法校验，保存后自动重载） |
+| GET /api/system/scripts/<kind>/files | 列出脚本文件（传统单文件 + 站点目录）及声明站点 |
+| GET /api/system/scripts/<kind>/source?name= · POST /api/system/scripts/upload | 按名查看 · 上传（multipart：kind+name+file[+force]）。上传前两级冲突检测——同名文件、website 与其他脚本重复——409 由用户决定覆盖（force=true）；**保存成功后立即重新扫描分发器**，新文件即刻生效，失败保留旧路由 |
+| DELETE /api/system/scripts/<kind>/<name> | 删除脚本文件并重新扫描 |
 | GET /api/system/config · GET/PUT /api/system/config/<段>/raw · POST /api/system/config/reload | 列配置段 · 以 YAML 读/写单段（写盘+内存即时生效） · 从文件整体重载 |
 
 统一响应 `{success, message/error, ...}`；主键身份均为 `(id, website)`。

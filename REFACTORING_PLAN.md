@@ -46,12 +46,14 @@
 - [x] 配置键与代码对齐（此前 downloader 读 `once_download`/`check_interval`、
       updater 读 `check_interval` 在 yaml 中根本不存在，服务一启动即异常循环）：
       轮间隔统一 `download_interval`/`update_interval`，数量限制
-      `once_download_number`/`once_update_number`，任务节奏 `sleep_second`，
+      `once_download_number`（update 侧每轮位点限量已移除），任务节奏 `sleep_second`，
       新增 `commit_interval`；清理重复的 `use_cache` 键
 - [x] 测试：pytest 五组（models / dispatcher / config / queue / migrations），24 例全过
 - [x] threadPool 自测代码引用不存在的方法（已删）；文档重写与代码一致
 - [x] 脚本热重载：系统页一键重载（失败保留旧路由并提示原因），无需重启进程
 - [x] 脚本 Web 上传：multipart 上传两种脚本（UTF-8/语法校验拒收坏脚本，保存后自动重载对应分发器）
+- [x] 脚本多文件分发：scripts/<kind>/<name>.py 每站点一个文件，路由跨文件合并（重名先到先得）；
+  上传两级冲突检测（同名文件/website 重复，409 由用户决定覆盖），保存后自动重新扫描生效
 - [x] 脚本依赖自描述：头部 `# requirements:` 声明，加载前自动检测并安装缺失依赖（packaging 可用时校验版本约束）
 - [x] 前端系统页：脚本路由查看/重载 + 单段 YAML 配置编辑器（写盘+内存即时生效）+ 配置整体重载
 - [x] 配置加载改为"构建副本-锁内整体换入"，消除热重载期间读方的空窗
@@ -62,6 +64,10 @@
 - [x] old_code/ 归档清理（git 历史可找回）
 - [x] 下载配置每站独立：download_sites.yaml 站点段覆盖全局（线程池/间隔/限量/缓存/路径/站点开关），
       每站点独立调度线程，守护线程自动发现/拉起站点
+- [x] 每站点可下载时间窗口：daily/weekly/monthly + start/end（支持跨天/月末负数），窗口外静默等待、
+      开窗即抢；配置非法 fail-open；配合 -1 限量/间隔实现窗口内全速突击消耗代理流量
+- [x] 更新调度每站点独立（与下载对称）：update_sites.yaml 站点段覆盖全局（线程/间隔/错峰/站点开关），
+      每站点独立调度线程，守护线程自动发现/拉起
 - [x] user 表按其真实语义更名：user → publish_pos（发布位点）、userId → authorId（含 upload），
       API/REPL/前端/脚本契约同步；迁移 0002 完成（schema v2），真实库数据无损
 

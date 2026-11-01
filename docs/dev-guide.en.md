@@ -86,13 +86,17 @@ init / System-tab reload / web upload
         │
         ▼
 ScriptDispatcher.load()
-  ├─ ensure_requirements()   parses "# requirements:" headers → detects missing packages
-  │                          (version-checked when packaging is available) → pip install under
-  │                          a lock (failures are logged, never blocking)
-  ├─ load_module_from_file() executes the module (top-level imports run here)
-  └─ scans public classes: website attr (str or list) → routes; no website → legacy
-     single-class fallback. Routes are committed atomically at the end — on failure the old
-     routes survive untouched.
+  ├─ evaluate sources() → file path list (legacy file first + scripts/<kind>/ dir sorted;
+  │  re-evaluated on every load, so uploads/deletes are picked up by a rescan)
+  ├─ per file ensure_requirements()  parses "# requirements:" headers → detects missing packages
+  │  (version-checked when packaging is available) → pip install under a lock (failures are
+  │  logged, never blocking)
+  ├─ per file load_module_from_file() scans public classes' website attr → routes merged across
+  │  files (duplicate sites: first loaded wins with a warning; files without website may
+  │  contribute the fallback, at most one)
+  └─ only after everything parses are self._routes/_wildcard/_file_routes committed — on
+     failure the old routes survive. `sites_by_file()` powers website-conflict detection for
+     uploads.
 ```
 
 - Dispatch: `dispatcher.get(website)` exact match → wildcard fallback → `ScriptRouteError`

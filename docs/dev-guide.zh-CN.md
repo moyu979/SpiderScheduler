@@ -73,11 +73,14 @@ init / 系统页重载 / 网页上传
         │
         ▼
 ScriptDispatcher.load()
-  ├─ ensure_requirements()   解析头部 "# requirements:" → 检测缺失（packaging 可用则校验
-  │                          版本约束）→ 锁内 pip install（失败仅记日志，不阻断）
-  ├─ load_module_from_file() exec 模块（此时脚本顶部 import 才执行）
-  └─ 扫描公共类：website 属性（str 或 list）→ 路由表；全无 website → 传统单类兜底。
-     路由解析完毕才一次性提交 self._routes/_wildcard —— 失败时旧路由原样保留。
+  ├─ 求值 sources() → 文件路径列表（传统单文件优先 + scripts/<kind>/ 目录排序；每次 load
+  │  重新求值，上传/删除文件后重扫即可发现变化）
+  ├─ 逐文件 ensure_requirements()  解析头部 "# requirements:" → 检测缺失（packaging 可用则
+  │  校验版本约束）→ 锁内 pip install（失败仅记日志，不阻断）
+  ├─ 逐文件 load_module_from_file() 扫描公共类 website 属性 → 跨文件合并路由
+  │  （重复站点先到先得并告警；无 website 的文件可贡献兜底，至多一个）
+  └─ 全部解析成功才一次性提交 self._routes/_wildcard/_file_routes —— 失败时旧路由原样保留。
+     `sites_by_file()` 供上传端点做 website 冲突检测。
 ```
 
 - 分发：`dispatcher.get(website)` 精确匹配 → 兜底 → `ScriptRouteError`（报可用站点）。

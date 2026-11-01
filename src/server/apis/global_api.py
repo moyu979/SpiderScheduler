@@ -5,7 +5,7 @@ from src.config.config import GetUnknownKey
 
 
 class GlobalApi:
-    """全局配置管理 API 类"""
+    """全局配置段（global_conf）的按键更新端点。"""
     
     def __init__(self):
         self.blueprint = Blueprint('global_api', __name__, url_prefix='/api/global')

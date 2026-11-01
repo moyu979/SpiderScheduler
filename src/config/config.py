@@ -1,9 +1,6 @@
-from functools import cache
-import os
-import sys
 import json
+import os
 import threading
-import time
 
 from src.utils.logging.logger import SpiderLogger as logger
 from src.config.paths import config_path
@@ -19,7 +16,14 @@ class GetUnknownKey(Exception):
     pass
 
 class ConfigManager:
-    """配置管理器类"""
+    """配置管理器：加载、热重载、环境变量覆盖与持久化。
+
+    数据结构：config_dict 是“配置段名 → 键值字典”的两层字典，每个段对应
+    confs/ 下的一个 yaml/json 文件。
+
+    线程模型：所有读写经 _config_lock（RLock）串行；热重载采用
+    “局部构建完整副本 → 锁内整体换入”，读方不会看到空窗。
+    """
 
     # 全局配置字典
     config_dict = {}
@@ -34,7 +38,7 @@ class ConfigManager:
     
     @classmethod
     def init_config(cls):
-        """获取配置值"""
+        """初始化入口：加载全部配置文件并启动热重载守护线程。"""
         ConfigManager.load_all_configs()
         ConfigManager.start_daemon()
 
@@ -159,8 +163,42 @@ class ConfigManager:
             return value
         
     @classmethod
+    def site_setting(cls, site_section, base_section, website, key):
+        """站点级配置读取：site_section.<website>.<key> 覆盖 base_section.<key>。
+
+        供按站点独立调度的服务（downloader / updater）解析配置；站点段未写出的
+        键回落全局基线段，覆盖值中的 ${BASE_PATH} 同样替换为工作目录。
+
+        Args:
+            site_section: 站点覆盖段名（download_sites / update_sites）。
+            base_section: 全局基线段名（download_setting / update_setting）。
+            website: 站点名。
+            key: 配置键。
+
+        Returns:
+            解析后的配置值。
+
+        Raises:
+            GetUnknownKey: 基线段/键也不存在时（由调用方决定兜底语义）。
+        """
+        site_conf = (cls.config_dict.get(site_section) or {}).get(website) or {}
+        value = site_conf[key] if key in site_conf else cls.get(base_section, key)
+        if isinstance(value, str) and '${BASE_PATH}' in value:
+            value = value.replace('${BASE_PATH}', str(cls.base_path))
+        return value
+
+    @classmethod
     def set(cls, dict_name, key, value):
-        """设置配置值并保存到文件"""
+        """更新单个配置键（内存 + 原子写盘）。
+
+        Args:
+            dict_name: 配置段名。
+            key: 配置键（必须已存在，不允许新增键）。
+            value: 新值。
+
+        Raises:
+            KeyError: 配置段不存在。
+        """
         with cls._config_lock:
             if dict_name not in cls.config_dict:
                 logger.error(f"配置字典不存在: {dict_name}")
@@ -171,7 +209,16 @@ class ConfigManager:
     
     @classmethod
     def replace_section(cls, dict_name, data):
-        """整体替换一个已存在的配置段并原子写盘（供系统管理 API 使用）"""
+        """整体替换一个已存在的配置段并原子写盘（供系统管理 API 使用）。
+
+        Args:
+            dict_name: 配置段名（必须已加载）。
+            data: 新的配置字典。
+
+        Raises:
+            KeyError: 配置段不存在。
+            ValueError: data 不是键值映射。
+        """
         with cls._config_lock:
             if dict_name not in cls.config_dict:
                 raise KeyError(f"配置段不存在: {dict_name}")

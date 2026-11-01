@@ -8,7 +8,7 @@ from datetime import datetime
 from src.config.config import GetUnknownKey
 
 class DownloadApi:
-    """下载管理 API 类"""
+    """作品/下载队列管理端点：入队、停止、重排与下载配置更新。"""
     
     def __init__(self):
         self.blueprint = Blueprint('download_api', __name__, url_prefix='/api/download')

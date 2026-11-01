@@ -132,15 +132,21 @@ class DatabaseManager:
     @classmethod
     @contextmanager
     def get_db_session(cls) -> Generator[Session, None, None]:
-        """
-        数据库会话上下文管理器
+        """数据库会话上下文管理器：退出提交、异常回滚、最后关闭。
 
-        自动处理会话的创建、提交、回滚和关闭
+        注意：提交后 ORM 对象即过期，跨会话使用数据必须在会话内拷贝成 dict。
+
         使用示例:
             with DatabaseManager.get_db_session() as session:
                 work = session.query(Works).first()
                 work.state = 'downloading'
                 # 自动提交（如果没有异常）
+
+        Yields:
+            Session: 已绑定引擎的 SQLAlchemy 会话。
+
+        Raises:
+            RuntimeError: 数据库尚未初始化（未调用 init_database）。
         """
         if cls.SessionLocal is None:
             raise RuntimeError("数据库未初始化，请先调用 DatabaseManager.init_database()")

@@ -1,8 +1,8 @@
-# src/initer/init.py (或 src/core/initialization.py)
+"""系统初始化模块。
 
-"""
-系统初始化模块
-负责初始化所有基础设施：文件、配置、日志、数据库
+以固定顺序初始化全部基础设施：文件 → 配置 → 日志 → 数据库 → REST API →
+更新器 → 下载器。任何一步失败都会向上抛出，由 main.py 直接终止启动——
+保证服务要么完整可用，要么不存在。
 """
 
 from pathlib import Path
@@ -16,7 +16,11 @@ from src.service.updater import init as init_updater
 from src.service.downloader import init as init_downloader
 
 def init_files() -> None:
-    """初始化工作目录结构"""
+    """把 assets 模板补齐到工作目录（BASEPATH）。
+
+    递归复制 src/assets 下的全部文件到 BASEPATH；只补缺失文件、绝不覆盖
+    已有文件，因此用户的配置修改和上传的脚本不会被启动抹掉。
+    """
     assets_dir = Path(__file__).resolve().parent.parent / "assets"
     docker_dir = Path(config_manager.base_path)
     
@@ -38,7 +42,11 @@ def init_files() -> None:
 
 
 def init():
-    """初始化后端系统 - 统一入口"""
+    """统一初始化入口：按依赖顺序启动全部子系统。
+
+    顺序即依赖关系：目录 → 配置 → 日志 → 数据库 → REST API → 更新器 → 下载器。
+    REST API 在后台线程运行；更新器/下载器各自启动调度线程。
+    """
     # 1. 初始化文件结构
     init_files()
     

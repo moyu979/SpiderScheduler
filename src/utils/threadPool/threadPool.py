@@ -1,13 +1,16 @@
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ThreadPoolExecutor
 from threading import Semaphore, Lock, Event
 import time
 import threading
 from src.utils.logging.logger import SpiderLogger as logger
 
 class ThreadPool(ThreadPoolExecutor):
-    """
-    阻塞式线程池执行器
-    维持指定数量的线程运行，当所有线程都在工作时，新的任务会阻塞等待
+    """阻塞式线程池执行器：池满时让提交方等待，形成天然背压。
+
+    与标准 ThreadPoolExecutor 的差异：
+    - submit 在信号量上阻塞，直到有工作线程空闲（而不是无界排队）；
+    - 内置活跃/完成/失败计数与 wait_for_completion 轮询等待；
+    - 全部内部状态经 _lock 保护。
     """
     
     def __init__(self, max_workers, name="BlockingThreadPool"):
@@ -26,9 +29,19 @@ class ThreadPool(ThreadPoolExecutor):
         logger.info(f"创建线程池: {name}, 最大线程数: {max_workers}")
     
     def submit(self, fn, *args, **kwargs):
-        """
-        提交任务到线程池
-        如果所有线程都在工作，会阻塞等待直到有线程空闲
+        """提交任务；池满时阻塞调用方直到有线程空闲（背压）。
+
+        任务被 wrap_fn 包装：统计活跃/完成/失败计数并记录异常日志。
+
+        Args:
+            fn: 任务函数。
+            *args, **kwargs: 透传给 fn 的参数。
+
+        Returns:
+            Future: 任务 future；异常也在其中（wrap_fn 已记录日志）。
+
+        Raises:
+            RuntimeError: 线程池已关闭。
         """
         if self._shutdown_event.is_set():
             raise RuntimeError("线程池已关闭")

@@ -5,7 +5,7 @@ from src.config.config import GetUnknownKey
 
 
 class NetworkApi:
-    """网络配置管理 API 类"""
+    """网络配置段（network）的按键更新端点。"""
     
     def __init__(self):
         self.blueprint = Blueprint('network_api', __name__, url_prefix='/api/network')

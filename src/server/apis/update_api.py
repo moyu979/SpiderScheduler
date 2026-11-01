@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 class UpdateApi:
-    """更新管理 API 类"""
+    """发布位点管理端点：添加、停止/恢复追踪与更新配置更新。"""
     
     def __init__(self):
         self.blueprint = Blueprint('update_api', __name__, url_prefix='/api/update')

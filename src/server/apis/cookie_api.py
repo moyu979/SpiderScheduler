@@ -145,7 +145,11 @@ def _err(message, code=400):
 
 
 class CookieApi:
-    """登录 cookie 管理 API 类"""
+    """登录 cookie 管理端点：状态查看、登录代理包装页、代理转发、保存/放弃/删除。
+
+    代理端点把请求转发到 websites.yaml 中该站点的域名：响应里的 Set-Cookie
+    不交给浏览器而是收进服务端会话，HTML 做同源改写——浏览器全程只见同源。
+    """
 
     def __init__(self):
         self.blueprint = Blueprint('cookie_api', __name__, url_prefix='/api/cookie')
@@ -215,6 +219,7 @@ class CookieApi:
                 logger.error(f"代理请求失败 {website}: {url}: {e}")
                 return _err(f"目标站请求失败: {str(e)}", 502)
 
+            logger.debug(f"[{website}] {request.method} {url} -> {resp.status_code}（{len(resp.content)}B）")
             content_type = resp.headers.get('Content-Type', '')
             body = resp.content
             if 'text/html' in content_type:
@@ -228,6 +233,7 @@ class CookieApi:
             """把该站点登录会话积累的 cookie 落盘"""
             session = _SESSIONS.get(website)
             if session is None or len(session.cookies) == 0:
+                logger.warning(f"保存 {website} cookie 失败：登录会话中没有 cookie")
                 return _err('该站点还没有可保存的 cookie，请先在登录页完成登录')
             cookies = [{
                 'name': c.name,

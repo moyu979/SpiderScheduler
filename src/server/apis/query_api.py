@@ -122,7 +122,11 @@ def _err(message, code=400):
 
 
 class QueryApi:
-    """查询统计 API 类"""
+    """只读查询端点：作品/位点的组合筛选列表与站点×状态计数统计。
+
+    筛选维度可任意组合（website / state 多选 / author / 日期区间 / keyword），
+    排序字段走白名单，分页由 limit/offset 控制。
+    """
 
     def __init__(self):
         self.blueprint = Blueprint('query_api', __name__, url_prefix='/api/query')
@@ -134,6 +138,7 @@ class QueryApi:
         def query_works():
             """组合筛选作品列表"""
             try:
+                logger.debug(f"query works 参数: {request.query_string.decode('utf-8', errors='replace')}")
                 limit, offset = _page_args()
                 with DatabaseManager.get_db_session() as session:
                     query = session.query(Works)
@@ -183,6 +188,7 @@ class QueryApi:
         def query_positions():
             """组合筛选发布位点列表（附带每个位点的作品关联数）"""
             try:
+                logger.debug(f"query positions 参数: {request.query_string.decode('utf-8', errors='replace')}")
                 limit, offset = _page_args()
                 with DatabaseManager.get_db_session() as session:
                     query = session.query(PublishPos)

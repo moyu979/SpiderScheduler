@@ -1,11 +1,19 @@
-import signal
-import time
-import sys
-import os
-import argparse
+"""SpiderScheduler 入口。
 
-#from src.core.backendManager import BackendManager
-#from src.initer.init_backend import init_backend
+职责只有三件事：
+1. 注册信号处理（SIGINT/SIGTERM 均走优雅退出：停调度服务 → 停 API → 停配置守护线程）；
+2. 解析启动参数（--basepath 工作目录、--repl 命令行模式）并写入全局配置；
+3. 调用 src/core/initialization.init() 完成全部初始化，然后阻塞等待退出信号。
+
+所有真正的初始化与业务逻辑都在 src/ 内，本文件不承载业务。
+"""
+
+import argparse
+import os
+import signal
+import sys
+import time
+
 from src.config.config import ConfigManager, config_manager
 
 from src.core.initialization import init
@@ -15,8 +23,14 @@ from src.service.updater import updater
 from src.service.downloader import downloader
 from src.utils.logging.logger import SpiderLogger as logger
 
+
 def signal_handler(sig, frame):
-    """处理 Ctrl+C 信号"""
+    """处理退出信号（SIGINT/SIGTERM）：按依赖顺序优雅停止全部服务。
+
+    顺序：调度服务（等线程池收尾）→ REST API → 配置热重载守护线程。
+    任一环节失败只记录并继续，保证退出流程完整。
+    """
+    logger.info("收到中断信号，正在安全退出")
     print('\n收到中断信号，正在安全退出...')
 
     # 停止调度服务（等待进行中的任务收尾）
@@ -42,8 +56,12 @@ def signal_handler(sig, frame):
     # 退出程序
     sys.exit(0)
 
-def main(base_path: str=None):
-    # 注册信号处理器（SIGTERM：docker stop 默认信号；SIGINT：Ctrl+C）
+def main(base_path: str = None):
+    """默认启动模式：完成初始化后阻塞等待退出信号。
+
+    Args:
+        base_path: 工作目录覆盖（None 时使用 ./docker 或 BASEPATH 环境变量）。
+    """
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -52,7 +70,10 @@ def main(base_path: str=None):
         config_manager.base_path = base_path
 
     init()
-    print("程序已启动，按 Ctrl+C 退出...")
+    logger.info("程序已启动（BASEPATH=%s，API=%s:%s）",
+                config_manager.base_path,
+                ConfigManager.get('network', 'rest_api_host'),
+                ConfigManager.get('network', 'rest_api_port'))
     
     try:
         # 无限循环，直到收到中断信号（默认模式）
@@ -64,7 +85,11 @@ def main(base_path: str=None):
         print("程序已安全退出")
 
 def main_with_repl(base_path: str | None = None) -> None:
-    # 复用 main 的启动流程，但把“阻塞 loop”替换成 REPL
+    """REPL 启动模式：初始化后进入内置命令行（供交互式管理）。
+
+    Args:
+        base_path: 工作目录覆盖（None 时使用 ./docker 或 BASEPATH 环境变量）。
+    """
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     if base_path:

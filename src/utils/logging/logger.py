@@ -7,6 +7,12 @@ import threading
 from src.config.paths import log_path as _global_log_path
 
 class SpiderLogger:
+    """统一日志门面：控制台 INFO + 文件 DEBUG（按月轮转）。
+
+    类方法式调用（logger.info(...)），内部经 _log_with_class 自动归属调用方
+    类名；初始化前的日志进入缓存，init_log() 后统一重放。五个级别方法均
+    支持标准 %-args 惰性格式化。
+    """
     """SpiderScheduler 日志管理器 (静态类)"""
     
     name = 'SpiderScheduler'
@@ -156,23 +162,48 @@ class SpiderLogger:
             cls._logger.handle(record)
     
     @classmethod
-    def debug(cls, message):
+    def debug(cls, message, *args):
+        if args:
+            try:
+                message = str(message) % args
+            except (TypeError, ValueError):
+                pass  # 格式化失败保留原消息，避免吞日志
         cls._log_with_class(logging.DEBUG, message)
     
     @classmethod
-    def info(cls, message):
+    def info(cls, message, *args):
+        if args:
+            try:
+                message = str(message) % args
+            except (TypeError, ValueError):
+                pass  # 格式化失败保留原消息，避免吞日志
         cls._log_with_class(logging.INFO, message)
     
     @classmethod
-    def warning(cls, message):
+    def warning(cls, message, *args):
+        if args:
+            try:
+                message = str(message) % args
+            except (TypeError, ValueError):
+                pass  # 格式化失败保留原消息，避免吞日志
         cls._log_with_class(logging.WARNING, message)
     
     @classmethod
-    def error(cls, message):
+    def error(cls, message, *args):
+        if args:
+            try:
+                message = str(message) % args
+            except (TypeError, ValueError):
+                pass  # 格式化失败保留原消息，避免吞日志
         cls._log_with_class(logging.ERROR, message)
     
     @classmethod
-    def critical(cls, message):
+    def critical(cls, message, *args):
+        if args:
+            try:
+                message = str(message) % args
+            except (TypeError, ValueError):
+                pass  # 格式化失败保留原消息，避免吞日志
         cls._log_with_class(logging.CRITICAL, message)
     
     @classmethod

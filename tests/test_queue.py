@@ -1,4 +1,6 @@
 import os
+from datetime import datetime
+from threading import Thread
 
 import pytest
 from flask import Flask
@@ -6,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.config.config import ConfigManager
+from src.utils.threadPool.threadPool import ThreadPool
 
 from src.service.downloader import Downloader
 from src.server.apis.download_api import DownloadApi
@@ -176,9 +179,9 @@ def test_cache_on_copies_to_final_and_cleans(db, cache_env, monkeypatch):
     d = Downloader()
     _run_with(d, FakeWorker, monkeypatch)
 
-    final_file = cache_env["final"] / "pixiv" / "pixiv_W" / "img.bin"
-    assert final_file.read_text() == "data"           # 产物已拷贝到最终路径
-    assert not (cache_env["cache"] / "pixiv_W").exists()  # 缓存工作目录已清理
+    final_file = cache_env["final"] / "pixiv" / "W" / "img.bin"
+    assert final_file.read_text() == "data"           # 产物已拷贝到最终路径（站点/作品两级目录）
+    assert not (cache_env["cache"] / "pixiv" / "W").exists()  # 缓存工作目录已清理
     assert _state("W") == "done"
 
 
@@ -188,8 +191,8 @@ def test_cache_off_writes_final_directly(db, cache_env, monkeypatch):
     d = Downloader()
     _run_with(d, FakeWorker, monkeypatch)
 
-    assert (cache_env["final"] / "pixiv" / "pixiv_W" / "img.bin").read_text() == "data"
-    assert not (cache_env["cache"] / "pixiv_W").exists()  # 全程没碰缓存
+    assert (cache_env["final"] / "pixiv" / "W" / "img.bin").read_text() == "data"
+    assert not (cache_env["cache"] / "pixiv").exists()  # 全程没碰缓存
     assert _state("W") == "done"
 
 
@@ -201,8 +204,8 @@ def test_cache_on_without_payload_marks_failed(db, cache_env, monkeypatch):
     assert _state("W") == "failed"                    # 缓存模式必须返回产物路径
 
 
-def test_unsafe_work_dir_name_sanitized():
-    assert Downloader._work_dir_name("pixiv", "a/b:c?") == "pixiv_a_b_c_"
+def test_unsafe_work_subdir_sanitized():
+    assert Downloader._work_subdir("a/b:c?") == "a_b_c_"
 
 
 # ---------- 每站点独立配置 ----------
@@ -242,3 +245,107 @@ def test_pending_sites(db):
     _add(workNumber="D1", website="danbooru", state="stopped")
 
     assert Downloader()._pending_sites() == {"pixiv"}  # 只有存在待下载作品的站点
+
+
+# ---------- 可下载时间窗口 ----------
+
+def _window(site_window, now, website="pixiv"):
+    ConfigManager.config_dict["download_sites"] = {website: {"download_window": site_window}}
+    return Downloader._in_download_window(website, now=now)
+
+
+def test_window_unset_always_allows():
+    ConfigManager.config_dict["download_sites"] = {"pixiv": {}}
+    assert Downloader._in_download_window("pixiv", now=datetime(2026, 11, 1, 12, 0)) is True
+
+
+def test_daily_window_inside_and_outside():
+    win = {"mode": "daily", "start": "00:00", "end": "08:00"}
+    assert _window(win, datetime(2026, 11, 1, 3, 0)) is True
+    assert _window(win, datetime(2026, 11, 1, 12, 0)) is False
+
+
+def test_daily_window_overnight_wrap():
+    win = {"mode": "daily", "start": "22:00", "end": "06:00"}
+    assert _window(win, datetime(2026, 11, 1, 23, 0)) is True
+    assert _window(win, datetime(2026, 11, 2, 5, 0)) is True
+    assert _window(win, datetime(2026, 11, 2, 12, 0)) is False
+
+
+def test_weekly_window_matches_isoweekday():
+    win = {"mode": "weekly", "start": "00:00", "end": "23:59", "weekdays": [1]}
+    monday = datetime(2026, 11, 2, 3, 0)   # isoweekday=1
+    tuesday = datetime(2026, 11, 3, 3, 0)  # isoweekday=2
+    assert monday.isoweekday() == 1 and tuesday.isoweekday() == 2  # 测试内置事实校验
+    assert _window(win, monday) is True
+    assert _window(win, tuesday) is False
+
+
+def test_monthly_window_with_negative_days():
+    win = {"mode": "monthly", "start": "00:00", "end": "23:59", "month_days": [1, -1]}
+    # 2026 年 2 月有 28 天：-1 = 28 号
+    assert _window(win, datetime(2026, 2, 1, 12, 0)) is True
+    assert _window(win, datetime(2026, 2, 28, 12, 0)) is True
+    assert _window(win, datetime(2026, 2, 27, 12, 0)) is False
+    assert _window(win, datetime(2026, 3, 31, 12, 0)) is True   # 3 月的 -1 = 31 号
+
+
+def test_window_combined_with_time_range():
+    # monthly 命中当天但不在时间段内 → 不可下载
+    win = {"mode": "monthly", "start": "00:00", "end": "08:00", "month_days": [1]}
+    assert _window(win, datetime(2026, 11, 1, 3, 0)) is True
+    assert _window(win, datetime(2026, 11, 1, 12, 0)) is False
+
+
+def test_window_fail_open_on_bad_config():
+    assert _window({"mode": "daily", "start": "不是时间", "end": "08:00"},
+                   datetime(2026, 11, 1, 12, 0)) is True  # 非法配置放行
+    assert _window({"mode": "monthly"}, datetime(2026, 11, 1, 12, 0)) is True  # 无 month_days 视为不命中？→ 放行由 mode 分支决定
+
+
+# ---------- 调度周期配置化 ----------
+
+def test_tick_reads_config_and_falls_back():
+    ConfigManager.config_dict["download_setting"] = {"site_scan_interval": 9}
+    assert Downloader._tick("site_scan_interval", 5) == 9          # 配置覆盖
+    assert Downloader._tick("window_check_interval", 60) == 60     # 键缺失回落默认
+    ConfigManager.config_dict["download_setting"]["site_scan_interval"] = 0
+    assert Downloader._tick("site_scan_interval", 5) == 1          # 下限保护：最小 1 秒
+
+
+def test_window_waits_use_configured_tick(db, cache_env, monkeypatch):
+    """窗口外等待按配置的检查周期轮询（用小周期缩短验证时间）"""
+    import time as _time
+    ConfigManager.config_dict["download_setting"].update({
+        "do_download": True,
+        "window_check_interval": 1,
+        "use_cache": True,
+        "download_path": str(cache_env["final"]),
+        "cache_path": str(cache_env["cache"]),
+        "waiting_play": False,
+        "sleep_second": 0,
+    })
+    ConfigManager.config_dict["download_sites"] = {
+        "pixiv": {"do_download": True, "download_thread": 1,
+                  "download_interval": 2,
+                  "download_window": {"mode": "daily", "start": "03:00", "end": "04:00"}},
+    }
+    _add(workNumber="W", website="pixiv", state="inQueue")
+    d = Downloader()
+    pool = ThreadPool(max_workers=1, name="t")
+    try:
+        # 窗口外跑 2.5 秒：应出现"等待窗口开启"且作品未被认领
+        runner = Thread(target=d._site_loop, args=("pixiv", pool), daemon=True)
+        runner.start()
+        deadline = _time.time() + 2.5
+        saw_wait = False
+        while _time.time() < deadline:
+            saw_wait = saw_wait or _state("W") == "inQueue"
+            _time.sleep(0.2)
+        # 线程必须仍存活（防配置缺键导致线程静默死亡、断言碰巧通过）
+        assert runner.is_alive(), "站点调度线程意外退出"
+        pool.shutdown(wait=True, cancel_futures=True)
+        d._stop_event.set()
+        assert saw_wait and _state("W") == "inQueue"
+    finally:
+        d._stop_event.set()

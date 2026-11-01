@@ -1,15 +1,15 @@
+import calendar
 import json
 import os
-import random
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, time as dtime
 from threading import Event, Thread
 
 from sqlalchemy import or_
 
-from src.config.config import ConfigManager, config_manager
-from src.config.paths import download_script_path
+from src.config.config import ConfigManager, GetUnknownKey, config_manager
+from src.config.paths import download_script_sources
 from src.service.dispatcher import ScriptDispatcher
 from src.utils.logging.logger import SpiderLogger as logger
 from src.utils.threadPool.threadPool import ThreadPool
@@ -40,8 +40,9 @@ class Downloader:
         use_cache 关：脚本直接拿到最终保存目录，写完即结束
     """
 
-    # 站点巡检周期（秒）
-    SUPERVISOR_TICK = 5
+    # 以下两个调度周期的默认值；实际生效值读 download_setting.yaml（可配置、热更新）
+    SUPERVISOR_TICK = 5      # download_setting.site_scan_interval
+    WINDOW_CHECK_TICK = 60   # download_setting.window_check_interval
 
     def __init__(self):
         self.dispatcher = None
@@ -54,19 +55,98 @@ class Downloader:
     @staticmethod
     def site_setting(website, key):
         """站点级下载配置：download_sites.<website>.<key> 覆盖 download_setting.<key>"""
-        site_conf = (ConfigManager.config_dict.get('download_sites') or {}).get(website) or {}
-        value = site_conf[key] if key in site_conf else ConfigManager.get('download_setting', key)
-        if isinstance(value, str) and '${BASE_PATH}' in value:
-            value = value.replace('${BASE_PATH}', str(ConfigManager.base_path))
-        return value
+        return ConfigManager.site_setting('download_sites', 'download_setting', website, key)
+
+    # ---------------- 可下载时间窗口 ----------------
+
+    @classmethod
+    def _tick(cls, key, default):
+        """读取调度周期类配置（秒）；键缺失或非法时用内置默认值，最小 1 秒。"""
+        try:
+            return max(1, int(ConfigManager.get('download_setting', key)))
+        except (GetUnknownKey, TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _parse_hhmm(value):
+        """解析 HH:MM 为 time 对象；非法返回 None（由调用方区分缺省与非法）"""
+        try:
+            hour, minute = str(value).split(':', 1)
+            return dtime(int(hour), int(minute))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _to_ints(values):
+        ints = []
+        for v in values or []:
+            try:
+                ints.append(int(v))
+            except (TypeError, ValueError):
+                continue
+        return ints
+
+    @classmethod
+    def _in_download_window(cls, website, now=None):
+        """当前时间是否处于该站点的可下载时间窗口。
+
+        未配置窗口（或配置非法）时始终放行（fail-open）。
+        mode: daily 每天 / weekly 每周（weekdays: 1=周一..7=周日）/ monthly 每月
+              （month_days 支持负数，-1=当月最后一天）；start/end 为 HH:MM，
+              支持跨天（如 22:00-06:00），start==end 视为空窗口。
+        """
+        try:
+            window = cls.site_setting(website, 'download_window')
+        except GetUnknownKey:
+            return True
+        if not isinstance(window, dict) or not window:
+            return True
+        mode = str(window.get('mode', 'always')).strip().lower()
+        if mode in ('', 'always'):
+            return True
+        now = now or datetime.now()
+        raw_start, raw_end = window.get('start'), window.get('end')
+        start = cls._parse_hhmm(raw_start) if raw_start is not None else dtime(0, 0)
+        end = cls._parse_hhmm(raw_end) if raw_end is not None else dtime(23, 59, 59)
+        if (raw_start is not None and start is None) or (raw_end is not None and end is None):
+            logger.warning(f"[{website}] download_window 的 start/end 格式非法，忽略时间窗口限制")
+            return True
+
+        if start <= end:
+            in_time = start <= now.time() < end
+        else:
+            in_time = now.time() >= start or now.time() < end  # 跨天窗口
+
+        if mode == 'daily':
+            return in_time
+        if mode == 'weekly':
+            weekdays = cls._to_ints(window.get('weekdays'))
+            if not weekdays:
+                logger.warning(f"[{website}] download_window.mode=weekly 但未配置 weekdays，忽略时间窗口限制")
+                return True
+            return now.isoweekday() in weekdays and in_time
+        if mode == 'monthly':
+            month_days = cls._to_ints(window.get('month_days'))
+            if not month_days:
+                logger.warning(f"[{website}] download_window.mode=monthly 但未配置 month_days，忽略时间窗口限制")
+                return True
+            last_day = calendar.monthrange(now.year, now.month)[1]
+            day = now.day
+            matched = any(
+                day == d or (d < 0 and day == last_day + d + 1)
+                for d in month_days
+            )
+            return matched and in_time
+        logger.warning(f"[{website}] download_window.mode 未识别: {mode}（支持 daily/weekly/monthly），忽略窗口限制")
+        return True
 
     # ---------------- 生命周期 ----------------
 
     def init(self):
         logger.info("Downloader初始化")
 
-        # 按 website 分发下载脚本，未声明 website 的传统单类作为兜底
-        self.dispatcher = ScriptDispatcher(download_script_path(), fallback_class_name="DownloadWork")
+        # 按 website 分发下载脚本（多文件来源，每次重载重新求值），未声明的传统单类兜底
+        self.dispatcher = ScriptDispatcher(download_script_sources, fallback_class_name="DownloadWork")
 
         supervisor = Thread(target=lambda: self._supervisor_loop(),
                             daemon=True, name="DownloadSupervisor")
@@ -74,7 +154,11 @@ class Downloader:
         logger.info("下载站点巡检守护线程已启动")
 
     def stop(self):
-        """请求停止全部站点调度，并等待各线程池任务收尾"""
+        """请求停止全部站点调度，并等待各线程池任务收尾。
+
+        置全局停止事件（所有 sleep 均基于它，可被立即唤醒）后逐池 shutdown；
+        各站点调度线程随之退出。
+        """
         self._stop_event.set()
         for pool in list(self._pools.values()):
             pool.shutdown(wait=True, cancel_futures=True)
@@ -94,10 +178,14 @@ class Downloader:
                             self._start_site_runner(website)
             except Exception as e:
                 logger.error(f"下载站点巡检异常: {e}")
-            self._stop_event.wait(timeout=self.SUPERVISOR_TICK)
+            self._stop_event.wait(timeout=self._tick('site_scan_interval', self.SUPERVISOR_TICK))
 
     def _pending_sites(self):
-        """当前有待下载作品（inQueue/NULL）的站点集合"""
+        """查询当前有待下载作品（inQueue/NULL）的站点集合。
+
+        Returns:
+            set[str]: 存在待下载作品的 website 集合；守护线程据此拉起站点调度线程。
+        """
         with DatabaseManager.get_db_session() as session:
             rows = (
                 session.query(Works.website)
@@ -131,13 +219,29 @@ class Downloader:
             logger.info(f"站点调度线程已退出: {website}")
 
     def _site_loop(self, website, pool):
-        """单个站点的下载调度循环：配置全部按站点解析，可热更新"""
+        """单个站点的下载调度循环：配置全部按站点解析，可热更新；受可下载时间窗口门控"""
+        outside_logged = False
+        inside_logged = False
         while not self._stop_event.is_set():
             # 站点级/全局开关关闭 → 退出本站调度线程，恢复后由守护线程重新拉起
             if not ConfigManager.get('download_setting', 'do_download') \
                     or not self.site_setting(website, 'do_download'):
                 logger.info(f"站点 {website} 下载已关闭，调度线程退出")
                 return
+
+            # 可下载时间窗口门控：窗口外分段等待（60s 一查，配置热更新及时生效），
+            # 仅在状态切换时打日志，避免刷屏
+            if not self._in_download_window(website):
+                if not outside_logged:
+                    logger.info(f"[{website}] 当前不在可下载时间窗口，等待窗口开启…")
+                    outside_logged = True
+                    inside_logged = False
+                self._stop_event.wait(timeout=self._tick('window_check_interval', self.WINDOW_CHECK_TICK))
+                continue
+            if not inside_logged:
+                logger.info(f"[{website}] 进入可下载时间窗口，开始调度")
+                inside_logged = True
+            outside_logged = False
 
             try:
                 start_time = datetime.now()
@@ -177,7 +281,12 @@ class Downloader:
                     remain = target_interval - elapsed
                     if remain > 0:
                         logger.info(f"[{website}] 本轮下载耗时: {elapsed:.2f}秒，休眠 {remain:.2f}秒后开始下一轮")
-                        self._stop_event.wait(timeout=remain)
+                        # 分段休眠：期间每 WINDOW_CHECK_TICK 回到循环顶部重新评估窗口与配置
+                        while remain > 0 and not self._stop_event.is_set():
+                            chunk = min(remain, self._tick('window_check_interval', self.WINDOW_CHECK_TICK))
+                            if self._stop_event.wait(timeout=chunk):
+                                return
+                            remain -= chunk
                     else:
                         logger.info(f"[{website}] 本轮下载耗时: {elapsed:.2f}秒，已超过间隔时间，立即开始下一轮")
 
@@ -188,7 +297,17 @@ class Downloader:
     # ---------------- 队列操作（按站点） ----------------
 
     def _claim_next_work(self, website):
-        """认领该站点按优先级排最前的待下载作品，认领即置为 downloading；无任务返回 None"""
+        """认领该站点按优先级排最前的待下载作品。
+
+        认领即置为 downloading（单线程认领，免竞态）；无任务返回 None。
+        注意：会话提交后 ORM 对象即过期，返回的字典必须在会话内构造。
+
+        Args:
+            website: 站点名（只认领该站点的作品）。
+
+        Returns:
+            dict | None: 作品快照（含 website/downloadInfo 等全部字段），无任务时 None。
+        """
         with DatabaseManager.get_db_session() as session:
             work = (
                 session.query(Works)
@@ -214,7 +333,16 @@ class Downloader:
             }
 
     def _finish_work(self, work_number, website, success):
-        """任务收尾：成功置 done 并记录 downloadDate，失败置 failed；不覆盖 stopped"""
+        """任务收尾：回写作品状态。
+
+        成功置 done 并记录 downloadDate；失败置 failed。仅当当前状态为
+        downloading 时才更新——不覆盖下载期间被 API 置入的 stopped。
+
+        Args:
+            work_number: 作品编号。
+            website: 站点名。
+            success: 下载是否成功。
+        """
         with DatabaseManager.get_db_session() as session:
             work = session.get(Works, (work_number, website))
             if work is None or work.state != 'downloading':
@@ -226,7 +354,7 @@ class Downloader:
                 work.state = 'failed'
 
     def _requeue_stale_downloading(self, website):
-        """把该站点上次进程中断残留的 downloading 重新入队（每轮开始时调用）"""
+        """把该站点上次进程中断残留的 downloading 重新入队（每轮开始时调用）。"""
         with DatabaseManager.get_db_session() as session:
             stale = (
                 session.query(Works)
@@ -240,9 +368,13 @@ class Downloader:
     # ---------------- 任务执行 ----------------
 
     @staticmethod
-    def _work_dir_name(website, work_number):
-        """每个作品的专属目录名（过滤文件系统不安全字符）"""
-        return re.sub(r'[^A-Za-z0-9_\-.]', '_', f"{website}_{work_number}")
+    def _work_subdir(work_number):
+        """作品在站点目录下的子目录名（过滤文件系统不安全字符）。
+
+        目录层级由调度器组装：<路径根>/<website>/<work>/，website 一层由
+        调用方拼接（每站点一个目录），这里只负责作品层。
+        """
+        return re.sub(r'[^A-Za-z0-9_\-.]', '_', str(work_number))
 
     @staticmethod
     def _parse_result(result):
@@ -251,12 +383,15 @@ class Downloader:
             return result.get('path'), result.get('duration')
         return result, None
 
-    def _deliver_to_final(self, cache_dir, payload, final_root, website, work_dir):
-        """cache 模式收尾：把脚本产出的数据拷贝到最终保存路径，然后清理该作品的缓存目录"""
+    def _deliver_to_final(self, cache_dir, payload, final_root, website, work_subdir):
+        """cache 模式收尾：把脚本产出的数据拷贝到最终保存路径，然后清理该作品的缓存目录。
+
+        目标层级：<final_root>/<website>/<work_subdir>/，与缓存侧层级对称。
+        """
         src = payload if os.path.isabs(payload) else os.path.join(cache_dir, payload)
         if not os.path.exists(src):
             raise RuntimeError(f"脚本返回的下载路径不存在: {src}")
-        dest_dir = os.path.join(final_root, website, work_dir)
+        dest_dir = os.path.join(final_root, website, work_subdir)
         os.makedirs(dest_dir, exist_ok=True)
         dest = os.path.join(dest_dir, os.path.basename(os.path.normpath(src)))
         if os.path.isdir(src):
@@ -285,14 +420,16 @@ class Downloader:
                     logger.warning(f"作品 {work_number}@{website} 的 downloadInfo 不是合法 JSON，已忽略")
 
             worker_class = self.dispatcher.get(website)
-            work_dir = self._work_dir_name(website, work_number)
+            # 目录层级：每站点一个目录（可经 download_sites.yaml 按站覆盖路径根），
+            # 作品子目录由调度器组装——脚本拿到的永远是"本任务专属目录"
+            work_subdir = self._work_subdir(work_number)
             if use_cache:
                 # 缓存开启：脚本只看到缓存中的工作目录，产物由框架拷贝到最终路径
                 cache_root = self.site_setting(website, 'cache_path')
-                target_dir = os.path.join(cache_root, work_dir)
+                target_dir = os.path.join(cache_root, website, work_subdir)
             else:
                 # 缓存关闭：脚本直接写最终保存目录
-                target_dir = os.path.join(final_root, website, work_dir)
+                target_dir = os.path.join(final_root, website, work_subdir)
             os.makedirs(target_dir, exist_ok=True)
 
             downloader_instance = worker_class(
@@ -310,7 +447,7 @@ class Downloader:
             if use_cache:
                 if not payload:
                     raise RuntimeError("缓存模式下 download_it 必须返回下载产物路径")
-                dest = self._deliver_to_final(target_dir, payload, final_root, website, work_dir)
+                dest = self._deliver_to_final(target_dir, payload, final_root, website, work_subdir)
                 logger.info(f"产物已拷贝到 {dest}")
 
             self._finish_work(work_number, website, success=True)

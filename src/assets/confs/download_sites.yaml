@@ -3,7 +3,15 @@
 # 站点级可用 do_download: false 单独关闭某站点（恢复后自动重新拉起）。
 #
 # 可覆盖的键：do_download / download_thread / once_download_number / download_interval /
-#             waiting_play / sleep_second / use_cache / download_path / cache_path
+#             waiting_play / sleep_second / use_cache / download_path / cache_path /
+#             download_window（可下载时间窗口，配合 once_download_number: -1 与
+#             download_interval: -1 可实现窗口内全速突击消耗代理流量）
+#
+# download_window 格式：
+#   mode: daily / weekly / monthly     （不写 = 不限制）
+#   start / end: "HH:MM"               （支持跨天，如 22:00-06:00）
+#   weekdays: [1, 5]                   （weekly 用，1=周一..7=周日）
+#   month_days: [1, 2, -1]             （monthly 用，负数=倒数第几天）
 #
 # 示例：
 # pixiv:
@@ -12,3 +20,7 @@
 #   download_interval: 3600
 # danbooru:
 #   do_download: false
+# gelbooru:
+#   download_window:
+#     mode: monthly            # 每月 1、2 号和最后一天的全天突击
+#     month_days: [1, 2, -1]

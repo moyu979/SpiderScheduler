@@ -11,10 +11,16 @@ from src.server.apis.update_api import UpdateApi
 from src.server.apis.network_api import NetworkApi
 from src.server.apis.query_api import QueryApi
 from src.server.apis.cookie_api import CookieApi
-from src.server.apis.system_api import SystemApi
+from src.server.apis.script_api import ScriptApi
+from src.server.apis.config_api import ConfigApi
 
 class RestApiService:
-    """REST API 服务类"""
+    """REST API 服务。
+
+    组装 Flask 应用：注册全部 API 蓝图、托管前端单页（/）、注册错误处理
+    （含登录代理页根相对请求的 404 救援）。使用 werkzeug make_server 以支持
+    优雅关闭。
+    """
     
     def __init__(self):
         logger.info("REST API 服务初始化开始")
@@ -60,7 +66,8 @@ class RestApiService:
         network_api = NetworkApi()
         query_api = QueryApi()
         cookie_api = CookieApi()
-        system_api = SystemApi()
+        script_api = ScriptApi()
+        config_api = ConfigApi()
 
         # 注册蓝图
         self.app.register_blueprint(download_api.blueprint)
@@ -69,7 +76,8 @@ class RestApiService:
         self.app.register_blueprint(network_api.blueprint)
         self.app.register_blueprint(query_api.blueprint)
         self.app.register_blueprint(cookie_api.blueprint)
-        self.app.register_blueprint(system_api.blueprint)
+        self.app.register_blueprint(script_api.blueprint)
+        self.app.register_blueprint(config_api.blueprint)
 
         logger.info("所有 API 模块已注册")
     
@@ -119,7 +127,7 @@ class RestApiService:
             }), 500
     
     def start(self):
-        """启动 REST API 服务"""
+        """启动 HTTP 服务并阻塞（应在后台线程调用）。"""
         try:
             logger.info(f"启动 REST API 服务: {self.host}:{self.port}")
             # 使用 Werkzeug 服务器，可以优雅关闭
@@ -135,7 +143,7 @@ class RestApiService:
             raise
     
     def stop(self):
-        """停止 REST API 服务"""
+        """优雅停止 HTTP 服务（等待已接受的请求处理完毕）。"""
         if self._server:
             logger.info("正在停止 REST API 服务...")
             try:

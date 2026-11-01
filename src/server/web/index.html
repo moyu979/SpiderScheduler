@@ -70,7 +70,10 @@
   #panel-system .sys-routes { color: var(--text); font-size: 13px; margin-top: 6px; display: grid; gap: 3px; }
   #panel-system .up-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; flex-wrap: wrap; }
   #panel-system .up-row code { font-size: 12px; background: #f1f3f6; padding: 1px 6px; border-radius: 4px; }
-  #panel-system .up-row input[type=file] { font-size: 12px; max-width: 230px; }
+  #panel-system .up-row input[type=file] { font-size: 12px; }
+  #panel-system .file-table { width: 100%; margin-top: 4px; }
+  #panel-system .file-table th, #panel-system .file-table td { padding: 4px 8px; font-size: 12px; }
+  #panel-system .file-table th { position: static; }
   #panel-system #script-view {
     max-height: 240px; overflow: auto; margin-top: 6px; white-space: pre;
     background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 8px;
@@ -163,21 +166,19 @@
         <button class="ghost" id="btn-reload-scripts">重载脚本</button>
       </div>
       <div class="sys-routes" id="script-routes">加载中…</div>
+      <div id="script-files">加载中…</div>
       <div class="up-row">
-        <span>下载脚本</span><code>scripts/download_a_work.py</code>
-        <button class="ghost" data-view="download">查看</button>
-        <input type="file" id="file-download" accept=".py">
-        <button class="ghost" data-up="download">上传</button>
+        <select id="up-kind">
+          <option value="download">下载脚本</option>
+          <option value="update">更新脚本</option>
+        </select>
+        <input type="text" id="up-name" placeholder="文件名（如 pixiv）" style="width:150px">
+        <input type="file" id="up-file" accept=".py">
+        <button class="ghost" id="btn-up-upload">上传</button>
+        <span class="hint">保存后自动重新扫描；同名文件或 website 与其他脚本重复时会询问是否覆盖</span>
       </div>
-      <div class="up-row">
-        <span>更新脚本</span><code>scripts/update_a_user.py</code>
-        <button class="ghost" data-view="update">查看</button>
-        <input type="file" id="file-update" accept=".py">
-        <button class="ghost" data-up="update">上传</button>
-      </div>
-      <span class="hint">上传前会做语法校验（语法错误拒收）；保存后自动重载，失败时旧路由继续生效并在上方提示原因</span>
-      <pre id="script-view" class="hidden"></pre>
       <span id="up-msg" class="hint"></span>
+      <pre id="script-view" class="hidden"></pre>
     </div>
     <div class="sys-block">
       <div class="sys-head">
@@ -243,6 +244,7 @@ async function _request(method, path, body) {
 const api = Object.assign((path) => _request('GET', path), {
   post: (path, body = {}) => _request('POST', path, body),
   put: (path, body = {}) => _request('PUT', path, body),
+  del: (path) => _request('DELETE', path),
 });
 
 async function action(path, body) {
@@ -640,6 +642,7 @@ async function loadSystem() {
   try {
     const data = await api('/api/system/scripts');
     renderScriptRoutes(data.routes || {});
+    await loadScriptFiles();
     const cfg = await api('/api/system/config');
     const sel = $('cfg-section');
     const cur = sel.value;
@@ -680,58 +683,104 @@ $('btn-reload-scripts').onclick = async (e) => {
 /* 脚本上传/查看 */
 const setUpMsg = (text) => { $('up-msg').textContent = text; };
 
-document.querySelectorAll('button[data-view]').forEach(btn => {
-  btn.onclick = async () => {
-    const pre = $('script-view');
-    const kind = btn.dataset.view;
-    if (pre.dataset.kind === kind && !pre.classList.contains('hidden')) {
-      pre.classList.add('hidden');
-      return;
-    }
-    try {
-      const data = await api(`/api/system/scripts/${kind}/source`);
-      pre.dataset.kind = kind;
-      pre.textContent = data.content;
-      pre.classList.remove('hidden');
-    } catch (err) { showError(err.message); }
-  };
-});
-
-document.querySelectorAll('button[data-up]').forEach(btn => {
-  btn.onclick = async () => {
-    const kind = btn.dataset.up;
-    const input = $(`file-${kind}`);
-    if (!input.files[0]) { setUpMsg('请先选择要上传的 .py 文件'); return; }
-    const fd = new FormData();
-    fd.append('kind', kind);
-    fd.append('file', input.files[0]);
-    btn.disabled = true;
-    setUpMsg('上传中…');
-    try {
-      const resp = await fetch('/api/system/scripts/upload', { method: 'POST', body: fd });
-      const data = await resp.json().catch(() => ({ success: false, error: '响应解析失败' }));
-      if (!resp.ok || data.success === false) {
-        setUpMsg('');
-        showError(data.error || `HTTP ${resp.status}`);
-      } else if (data.reload && data.reload.ok === false) {
-        setUpMsg(`已保存，但重载失败（旧路由生效中）：${data.reload.error}`);
-        await refreshRoutes();
-      } else {
-        setUpMsg(`已保存并生效：${data.saved_path}`);
-        await refreshRoutes();
-      }
-      input.value = '';
-    } catch (err) { setUpMsg(''); showError(err.message); }
-    btn.disabled = false;
-  };
-});
+const KIND_LABEL = { download: '下载脚本', update: '更新脚本' };
 
 async function refreshRoutes() {
   try {
     const data = await api('/api/system/scripts');
     renderScriptRoutes(data.routes || {});
+    await loadScriptFiles();
   } catch (e) { /* 路由刷新失败不遮蔽上传结果 */ }
 }
+
+async function loadScriptFiles() {
+  let html = '';
+  for (const kind of ['download', 'update']) {
+    let files = [];
+    try {
+      files = (await api(`/api/system/scripts/${kind}/files`)).files || [];
+    } catch (e) { showError(`加载 ${KIND_LABEL[kind]} 列表失败: ${e.message}`); }
+    const rows = files.map(f => `<tr>
+        <td><code>${esc(f.name)}.py</code>${f.legacy ? ' <span class="hint">(传统单文件)</span>' : ''}</td>
+        <td>${f.websites.length ? f.websites.map(esc).join('，') : '<span class="hint">兜底/未声明</span>'}</td>
+        <td class="actions">
+          <button class="ghost" data-sview="${esc(kind)}|${esc(f.name)}">查看</button>
+          <button class="ghost" data-sdel="${esc(kind)}|${esc(f.name)}">删除</button>
+        </td>
+      </tr>`).join('');
+    html += `<div style="margin-top:6px"><b>${KIND_LABEL[kind]}</b>（scripts/${kind}/，传统单文件优先）
+      <table class="file-table"><thead><tr><th>文件</th><th>声明站点</th><th>操作</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="3" class="empty" style="padding:10px">无脚本文件</td></tr>'}</tbody></table></div>`;
+  }
+  $('script-files').innerHTML = html;
+}
+
+async function uploadScript(force) {
+  const kind = $('up-kind').value;
+  const name = $('up-name').value.trim().replace(/\.py$/i, '');
+  const file = $('up-file').files[0];
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) { setUpMsg('文件名只能含字母/数字/下划线/连字符', false); return; }
+  if (!file) { setUpMsg('请先选择要上传的 .py 文件', false); return; }
+  const fd = new FormData();
+  fd.append('kind', kind); fd.append('name', name); fd.append('file', file);
+  if (force) fd.append('force', 'true');
+  $('btn-up-upload').disabled = true;
+  setUpMsg('上传中…');
+  try {
+    const resp = await fetch('/api/system/scripts/upload', { method: 'POST', body: fd });
+    const data = await resp.json().catch(() => ({ success: false, error: '响应解析失败' }));
+    if (resp.status === 409 && data.conflict) {
+      const parts = [];
+      if (data.conflict.fileExists) parts.push('同名文件已存在');
+      if (data.conflict.websites.length) parts.push(`website 与其他脚本重复：${data.conflict.websites.join('、')}`);
+      if (window.confirm(`${parts.join('；')}。\n是否覆盖？`)) { await uploadScript(true); return; }
+      setUpMsg('已取消');
+    } else if (!resp.ok || data.success === false) {
+      setUpMsg(''); showError(data.error || `HTTP ${resp.status}`);
+    } else if (data.reload && data.reload.ok === false) {
+      setUpMsg(`已保存，但重新扫描失败（旧路由生效中）：${data.reload.error}`);
+      await refreshRoutes();
+    } else {
+      setUpMsg(`已保存并重新扫描生效：${data.saved_path}`);
+      await refreshRoutes();
+    }
+    $('up-file').value = '';
+  } catch (err) { setUpMsg(''); showError(err.message); }
+  $('btn-up-upload').disabled = false;
+}
+
+$('btn-up-upload').onclick = () => uploadScript(false);
+
+document.getElementById('script-files').addEventListener('click', async (e) => {
+  const viewBtn = e.target.closest('button[data-sview]');
+  if (viewBtn) {
+    const [kind, name] = viewBtn.dataset.sview.split('|');
+    const pre = $('script-view');
+    const key = `${kind}|${name}`;
+    if (pre.dataset.key === key && !pre.classList.contains('hidden')) { pre.classList.add('hidden'); return; }
+    try {
+      const data = await api(`/api/system/scripts/${kind}/source?name=${encodeURIComponent(name)}`);
+      pre.dataset.key = key;
+      pre.textContent = data.content;
+      pre.classList.remove('hidden');
+    } catch (err) { showError(err.message); }
+    return;
+  }
+  const delBtn = e.target.closest('button[data-sdel]');
+  if (delBtn) {
+    const [kind, name] = delBtn.dataset.sdel.split('|');
+    if (!window.confirm(`确定删除脚本 ${name}.py 吗？删除后立即重新扫描。`)) return;
+    delBtn.disabled = true;
+    try {
+      const data = await api.del(`/api/system/scripts/${kind}/${encodeURIComponent(name)}`);
+      setUpMsg(data.reload && data.reload.ok === false
+        ? `已删除，但重新扫描失败（旧路由生效中）：${data.reload.error}`
+        : `已删除 ${name}.py 并重新扫描`);
+      await refreshRoutes();
+      loadScriptFiles();
+    } catch (err) { showError(err.message); delBtn.disabled = false; }
+  }
+});
 
 $('cfg-section').onchange = (e) => loadSection(e.target.value).catch(err => showError(err.message));
 

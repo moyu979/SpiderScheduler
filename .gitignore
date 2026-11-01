@@ -12,6 +12,9 @@ docker/
 __pycache__/
 **/__pycache__/
 
+# 忽略 pytest 缓存
+.pytest_cache/
+
 # 忽略Python编译文件
 *.pyc
 *.pyo

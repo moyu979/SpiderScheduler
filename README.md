@@ -1,5 +1,15 @@
 # SpiderScheduler
 
+> [!WARNING]
+> **免责声明 / Disclaimer**
+>
+> 1. 本项目由 AI 辅助生成，**尚未经过实际使用校验**，可能存在未知缺陷，使用后果自负。
+>    This project is AI-generated and **has not been validated in real-world use** — use it at
+>    your own risk.
+> 2. 尚未选定开源协议：**在协议确定之前，不允许使用、复制或分发本源码**。
+>    No open-source license has been chosen yet: **using, copying, or distributing this source
+>    code is not permitted until a license is selected**.
+
 多站点、插件式的爬虫调度系统 / A multi-site, plugin-based crawler scheduling system.
 
 > 框架负责调度、队列、状态管理与 Web 界面；具体怎么爬由用户脚本按 `website` 分发决定。

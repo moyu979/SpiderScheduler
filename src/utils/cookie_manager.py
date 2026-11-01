@@ -22,7 +22,12 @@ class CookieNotFoundError(Exception):
 
 
 class CookieManager:
-    """按 website 读写 cookie 文件"""
+    """按 website 读写 cookie 文件（静态方法集合，无实例状态）。
+
+    存储为 JSON 数组，每条 cookie 与 Selenium get_cookies() 输出兼容，
+    因此既能逐条 add_cookie 给浏览器，也能经 get_header() 拼成 requests 的
+    Cookie 请求头。
+    """
 
     @classmethod
     def _cookie_file(cls, website: str) -> str:

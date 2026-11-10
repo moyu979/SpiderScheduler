@@ -5,6 +5,9 @@ testCode
 # 忽略根目录下的docker文件夹（用于存储docker数据的）
 docker/
 
+# 忽略根目录下的站点脚本目录（本地爬虫脚本，不随仓库发布）
+/scripts/
+
 # 忽略行数统计文件
 .VSCodeCounter
 
@@ -24,6 +27,7 @@ __pycache__/
 # 忽略IDE和编辑器文件
 .vscode/
 .idea/
+.zcode/
 *.swp
 *.swo
 *~

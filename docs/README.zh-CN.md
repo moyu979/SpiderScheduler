@@ -64,7 +64,7 @@ class DownloadWork:
 SpiderScheduler/
 ├── main.py            # 入口（--repl 命令行、--basepath 工作目录）
 ├── src/               # 调度器、API、前端、基础设施
-├── tests/             # pytest 测试（71 例）
+├── tests/             # pytest 测试（124 例）
 ├── docker/            # 默认工作目录（运行数据，不入库）
 ├── docs/              # 本文档目录
 ├── Dockerfile / docker-compose.yml / .dockerignore

@@ -14,16 +14,16 @@ main.py ──► src/core/initialization.py (single init: files→config→logg
      ▼               ▼                ▼                 ▼
  src/config     src/server       src/service        src/utils
  config/paths   rest_api + 7     updater/downloader  database/cookie/logging/
- (hot reload)   blueprints + web dispatcher          threadPool/dynamic_loader/browser
+ (hot reload)   blueprints + web dispatcher          threadPool/dynamic_loader
 ```
 
-Dependencies point downwards only; no reverse imports. ~4300 lines of Python plus a 685-line
+Dependencies point downwards only; no reverse imports. ~5400 lines of Python plus a 958-line
 single-file frontend.
 
 Key decisions and their rationale:
 
 - **Site differences live in data**: `downloadInfo` carries per-work parameters,
-  `download_sites.yaml` carries pacing, `websites.yaml` carries entry URLs; the framework has
+  `download.yaml` (site section) carries pacing, `websites.yaml` carries entry URLs; the framework has
   zero site logic.
 - **Scripts are plugins**: dynamic loading + routing by `website`; dependencies auto-installed
   before load; failed reloads keep old routes.
@@ -129,12 +129,21 @@ semantics) — **yield works from newest to oldest**.
 
 ## 4. Scheduler Internals
 
-### 4.1 Updater
+### 4.1 Updater (per site)
 
-Single loop: query non-stopped positions → submit one thread-pool task per position
-(staggered by `commit_interval` ±10%) → wait for the round → sleep `update_interval` ±10%.
+```
+supervisor thread (5s tick): global do_update on → find sites having non-stopped positions →
+    start a runner each
+runner: creates the site's own ThreadPool(update_thread) → _site_loop
+_site_loop: exits when the site-level do_update is off (supervisor restarts on re-enable) →
+    each round: query this site's non-stopped positions → submit one pool task per position
+    (staggered by commit_interval ±10%) → wait for the round → sleep update_interval ±10%
+    (-1 = keep updating continuously)
+```
+
 Per item: insert `works` (IntegrityError = exists, ignored) then `upload`
-(IntegrityError = already synced, break).
+(IntegrityError = already synced, break). `page_interval` (in-position paging delay) is
+resolved per site and injected into the script instance.
 
 ### 4.2 Downloader (per site)
 
@@ -172,8 +181,7 @@ pools shut down when their runner exits.
   in string values is replaced with the work directory.
 - `replace_section()`: the write path behind the System-tab config editor (root must be a
   mapping, section must already exist, atomic disk write).
-- `site_setting(website, key)` (Downloader): `download_sites.<website>.<key>` overrides
-  `download_setting.<key>`; override values get `${BASE_PATH}` replacement too.
+- `site_setting(website, key)` (Downloader): `download.yaml`'s `site.<website> > site.default > code fallback`; override values get `${BASE_PATH}` replacement too.
 
 ## 6. Login Proxy Internals
 
@@ -206,7 +214,7 @@ from Flask's `/` route.
 ## 8. Testing
 
 ```bash
-python3 -m pytest tests/          # 71 cases
+python3 -m pytest tests/          # 124 cases
 ```
 
 | File | Covers |
@@ -215,9 +223,13 @@ python3 -m pytest tests/          # 71 cases
 | test_dispatcher | routing/fallback/reload safety/requirements |
 | test_config | copy-then-swap atomicity, env overrides, replace_section, ${BASE_PATH} |
 | test_queue | claim ordering/state writes/stopped protection/crash recovery/cache wrapper/per-site isolation |
+| test_updater | per-site config resolution, per-site scheduling, newest-first yields, page_interval injection |
+| test_script_tools | log outlet, site URLs, Selenium assembly stubs, dynamic registration |
+| test_e2e | embedded fake site + real scheduling end-to-end |
+| test_logger | log caller attribution (instance/classmethod) and monthly rotation |
 | test_query_api | filter combinations, pagination, stats |
 | test_cookie | HTML rewriting, storage, save flow |
-| test_system_api | routes/reload/upload, raw config I/O |
+| test_system_api | routes/reload/upload, raw config I/O, website entry CRUD, update-now |
 | test_migrations | version stamp idempotence, PRAGMAs, v1→v2 upgrade |
 
 Common patterns: `monkeypatch.setattr(ConfigManager, "base_path", str(tmp_path))` to isolate
@@ -226,9 +238,9 @@ bare Flask app and use `test_client`.
 
 ## 9. Extension Guide
 
-**Onboard a new site**: ① add the entry URL to `websites.yaml` (System tab) → ② log in on the
+**Onboard a new site**: ① add the entry on the Cookie tab → ② log in on the
 Cookie tab → ③ upload your scripts (declare `website`, optionally `# requirements:`) →
-④ optionally add pacing overrides in `download_sites.yaml`. No restarts needed.
+④ optionally add pacing overrides in `download.yaml` (site section). No restarts needed.
 
 **Add a REST endpoint**: add a route in the relevant blueprint's `_register_routes` (use the
 `_err` helper, include `success` in responses) and register it in the API tables of

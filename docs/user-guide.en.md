@@ -24,7 +24,7 @@ Open `http://127.0.0.1:8300`. The first start generates config templates and an 
 database in the work directory automatically.
 
 > Port note: the default is 8300. Port 5000 is occupied by AirPlay Receiver on macOS, so it
-> is avoided; change `rest_api_port` in `confs/network.yaml` if needed.
+> is avoided; change `rest_api_port` in `confs/system.yaml` if needed.
 
 ### 1.2 Docker
 
@@ -71,7 +71,9 @@ Backing up = copying this directory; moving hosts = copying this directory.
   from `websites.yaml`); it takes effect immediately — the next update round walks that
   author. Duplicates are rejected with a clear message.
 - **Filters**: site, state (inQueue/stopped), keyword, add-time range.
-- **Row actions**: **Stop tracking** (the author is no longer updated) / **Resume tracking**.
+- **Row actions**: **Stop tracking** (the author is no longer updated) / **Resume tracking**;
+  **Update now** (bypasses the round schedule and syncs this one position in the
+  background — the button turns into "updating…" and shows the added count when done).
 - Each row shows the position's **work count** (established author↔work links).
 
 ### 2.3 Cookie
@@ -99,14 +101,14 @@ Scripts consume cookies via the injected `cookie_manager` (see §4).
 - **User scripts**: shows the current route table (`site → class`, plus the fallback class).
   After editing scripts in the work directory, click **Reload scripts**; broken scripts keep
   the old routes with the reason shown in red.
-- **Upload scripts**: pick a kind (download / update), a file name and a .py file. Scripts use
+- **Upload scripts**: pick a kind (download / update) and a .py file; the "file name" field is the server-side save name — leave it empty to derive it from the uploaded file's name (non-ASCII names need a manual save name). Scripts use
   **multi-file dispatch**: `scripts/<kind>/<name>.py`, one file per site, routes merged across
   files. UTF-8/syntax validation runs first, then two conflict checks — a file with the same
   name, or a website already declared by another script — return 409 and **the UI asks whether
   to overwrite** (confirmed with force); **after a successful save the dispatcher is rescanned
   immediately**, so new files take effect at once; on rescan failure old routes stay active.
   The file list supports viewing and deleting online (delete rescans too).
-- **Config editor**: pick any section (e.g. `download_setting`, `websites`), edit it as YAML;
+- **Config editor**: pick any section (e.g. `download`, `websites`), edit it as YAML;
   saving writes to disk and takes effect in memory immediately. "Reload all from files"
   forces a full config reload.
 
@@ -114,39 +116,46 @@ Scripts consume cookies via the injected `cookie_manager` (see §4).
 
 Config lives in `confs/*.yaml`; changes hot-reload within ~10 s (System-tab saves apply
 immediately). Environment variables override in memory: `<SECTION>_<KEY>` upper-cased, e.g.
-`DOWNLOAD_SETTING_DO_DOWNLOAD=true`, `TOKEN_PIXIV=xxx`.
+`DOWNLOAD_DO_DOWNLOAD=true`, `WEBSITES_PIXIV=https://www.pixiv.net`.
 
-### 3.1 download_setting.yaml (global download config)
+### 3.1 download.yaml (download config: global + site layers merged)
 
-| Key | Description | Default |
-|---|---|---|
-| `do_download` | Download master switch (parent of per-site switches) | false |
-| `download_thread` | Default download threads per site (overridable) | 1 |
-| `once_download_number` | Per-site per-round download limit, -1 = unlimited | -1 |
-| `download_interval` | Per-site round interval in seconds, -1 = keep downloading | -1 |
-| `waiting_play` | When true, sleep for the duration returned by the script | false |
-| `sleep_second` | Fixed sleep between tasks (seconds) | 10 |
-| `use_cache` | Cache switch (see §5) | true |
-| `download_path` | Final storage path, supports `${BASE_PATH}` | `./${BASE_PATH}/datas/download` |
-| `cache_path` | Cache staging path | `./${BASE_PATH}/datas/download_cache` |
-
-### 3.2 download_sites.yaml (per-site config)
-
-Keys are `website` values; each entry overrides the global settings, missing keys fall back:
+Root keys are the switches and scan periods that **cannot be overridden per
+site**; all site-overridable keys live under the `site` structure (resolution
+order: **site.<website> > site.default > built-in code defaults** — a missing
+key on any layer never breaks scheduling). Day-to-day tuning only touches
+`site.default`:
 
 ```yaml
-pixiv:
-  download_thread: 2
-  sleep_second: 8
-  download_interval: 3600
-danbooru:
-  do_download: false        # disable one site (auto-restarted when re-enabled)
+# ---- global layer (root keys) ----
+do_download: false            # download master switch (parent of per-site switches)
+site_scan_interval: 5         # site-scan period in seconds (discovery delay)
+window_check_interval: 60     # poll period outside the download window
+
+# ---- site layer ----
+site:
+  default:                    # shared defaults for all sites
+    download_thread: 1        # download threads per site
+    once_download_number: -1  # per-round download limit, -1 = unlimited
+    download_interval: 3600   # round interval in seconds, -1 = keep downloading
+    waiting_play: false       # sleep for the duration returned by the script
+    sleep_second: 15          # fixed sleep between tasks (seconds)
+    use_cache: true           # cache switch (see §5)
+    download_path: "./${BASE_PATH}/datas/download"
+    cache_path: "./${BASE_PATH}/datas/download_cache"
+
+  pixiv:                      # a site section only lists keys that differ
+    download_thread: 2
+    sleep_second: 8
+  danbooru:
+    do_download: false        # disable one site (auto-restarted when re-enabled)
 ```
 
 Note: `download_thread` is read when a site's scheduler thread starts — restart the process
-after changing it; every other key hot-applies.
+after changing it; every other key hot-applies. Without `download_path`/`cache_path` the
+code falls back to `BASEPATH/datas/{download,download_cache}`.
 
-### 3.2.1 Download Window (burst-burn proxy traffic)
+### 3.1.1 Download Window (burst-burn proxy traffic)
 
 Each site can define *when* downloading is allowed — outside the window the site's scheduler
 thread idles quietly (re-evaluated every 60 s) and starts grabbing the moment the window
@@ -161,14 +170,15 @@ opens. Three modes (`start`/`end` are HH:MM, overnight ranges like 22:00-06:00 a
 Recommended recipe for burning proxy traffic (full speed inside the window):
 
 ```yaml
-# download_sites.yaml
-pixiv:
-  download_window:
-    mode: monthly          # the 1st, 2nd and last day of each month
-    month_days: [1, 2, -1]
-  once_download_number: -1   # unlimited
-  download_interval: -1      # continuous
-  sleep_second: 0            # no pause between tasks
+# download.yaml
+site:
+  pixiv:
+    download_window:
+      mode: monthly          # the 1st, 2nd and last day of each month
+      month_days: [1, 2, -1]
+    once_download_number: -1   # unlimited
+    download_interval: -1      # continuous
+    sleep_second: 0            # no pause between tasks
 ```
 
 Details: no new tasks are claimed outside the window; in-flight tasks finish naturally. No
@@ -176,16 +186,22 @@ window configured = unrestricted. Invalid config (bad time format, weekly withou
 monthly without month_days) **fails open** with a warning — it never silently stops your
 downloads.
 
+### 3.2 update.yaml (update config: global + site layers merged)
+
+Same structure as download.yaml: root key `do_update` master switch;
+`site.default` holds `update_thread` (threads) / `update_interval` (round
+interval) / `commit_interval` (submit stagger **between positions**) /
+`page_interval` (fetch interval **between pages within one position**, resolved
+by the framework and injected into the updater script — pagination is owned by
+the script; pure-API sites can ignore it); `site.<website>` overrides per site
+(updates crawl the target site too — rate-limit per site).
+
 ### 3.3 Other Sections
 
 | Section | Keys |
 |---|---|
-| `update_setting` | `do_update` master switch, `update_thread`, `update_interval`, `commit_interval` (stagger) — global defaults |
-| `update_sites` | `<website>: {key overrides}` | per-site update config (updates crawl the target site too — rate-limit per site) |
-| `websites` | `<website>: entry URL` — target of the login proxy and source of site dropdowns |
-| `network` | `rest_api_host` / `rest_api_port`, proxy settings |
-| `global_conf` | `conf_reload_interval`, `debug` |
-| `database` | `url` (empty = SQLite; a Postgres URL also works), `echo`, `connect_args` |
+| `system` | merged from four files: `debug`/`conf_reload_interval`/`conf_retry_interval` (runtime), `console_log_level`/`file_log_level` (logging), `database_url`/`database_echo`/`database_connect_args` (database; remote DBs skip schema migration), `rest_api_host`/`rest_api_port`/`use_proxy`/`proxy_ip`/`proxy_port` (network & proxy) |
+| `websites` | `<website>: entry URL` — target of the login proxy and source of site dropdowns; manageable online on the Cookie tab (writes back to this file) |
 
 ## 4. User Script Contract
 
@@ -208,7 +224,7 @@ class DownloadWork:
 ```
 
 Update scripts are iterators yielding works (fields in Dev Guide §3.2). If a site is missing
-from dropdowns, add its entry URL to `websites.yaml` on the System tab first.
+from dropdowns, add it via "Add site" on the Cookie tab first (writes back to `websites.yaml`).
 
 ## 5. Download Cache
 
@@ -227,6 +243,7 @@ Responses are `{"success": true/false, ...}`; entity identity is always `(id, we
 |---|---|
 | `POST /api/update/add_pos` | `{authorId, website?}` add a publish position (default site pixiv) |
 | `POST /api/update/stop_pos` / `resume_pos` | stop / resume tracking a position |
+| `POST /api/update/update_now` | `{authorId, website?}` update one position immediately (background); `GET /api/update/update_now/status` for status |
 | `POST /api/download/add_work` | `{workNumber, website?, downloadInfo?}` enqueue a work |
 | `POST /api/download/stop_work` / `requeue_work` | stop / requeue |
 | `GET /api/query/works` | filters: `website` (csv), `state` (csv, `none`=NULL), `author`, `date_field`+`date_from`+`date_to`, `keyword`, `sort`, `order`, `limit`, `offset` |
@@ -245,7 +262,8 @@ Responses are `{"success": true/false, ...}`; entity identity is always `(id, we
 - **Page looks stale/blank**: hard-refresh the browser (the HTML is read from disk per request).
 - **Config/script change not applying**: config hot-reloads within ~10 s (System-tab saves are
   immediate); scripts need "Reload scripts"; `download_thread` is the exception — restart.
-- **Site dropdown empty**: add the site entry to `websites.yaml` on the System tab first.
+- **Site dropdown empty**: add the site via "Add site" on the Cookie tab first (writes back
+  to `websites.yaml`).
 - **Works stuck at failed**: check the log for the script exception, fix it, then requeue.
 - **Login page renders oddly**: strict CSP or JS-built absolute URLs are known proxy
   limitations.

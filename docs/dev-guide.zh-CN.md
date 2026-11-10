@@ -13,14 +13,14 @@ main.py ──► src/core/initialization.py（统一 init：文件→配置→�
      ▼               ▼                ▼                 ▼
  src/config     src/server       src/service        src/utils
  配置/路径       rest_api + 7蓝图  updater/downloader  database/cookie/logging/
- （热重载）      + 前端托管        dispatcher          threadPool/dynamic_loader/browser
+ （热重载）      + 前端托管        dispatcher          threadPool/dynamic_loader
 ```
 
-依赖方向自上而下、无反向引用。全库 ~4300 行 Python + 685 行前端单页。
+依赖方向自上而下、无反向引用。全库 ~5400 行 Python + 958 行前端单页。
 
 关键设计决策（背景与理由）：
 
-- **站点差异收拢在数据里**：`downloadInfo` 承载参数维度，`download_sites.yaml` 承载节奏维度，
+- **站点差异收拢在数据里**：`downloadInfo` 承载参数维度，`download.yaml` 的 site 段承载节奏维度，
   `websites.yaml` 承载入口维度；框架代码零站点逻辑。
 - **脚本即插件**：动态加载 + 按 `website` 路由；加载前自动装依赖；重载失败保留旧路由。
 - **单写者模型**：作品认领、状态回写都发生在"站点调度线程"这一个线程里，天然免竞态；
@@ -110,11 +110,18 @@ def __iter__ / __next__                  # 逐条产出 dict：
 
 ## 4. 调度器内部
 
-### 4.1 Updater
+### 4.1 Updater（每站点独立）
 
-单循环：查未停止位点 → 逐位点提交线程池任务（`commit_interval` ±10% 错峰）→ 等本轮收尾 →
-`update_interval` ±10% 休眠。任务内逐条入库：`works`（IntegrityError=已存在，忽略）→
-`upload`（IntegrityError=已同步过，break）。
+```
+守护线程（5s 巡检）：全局 do_update 开 → 发现有未停止位点的站点 → 为每个站点拉起 runner
+runner：建站点专属 ThreadPool(update_thread) → _site_loop
+_site_loop：站点级 do_update 关闭即退出（恢复后守护线程重拉）→ 每轮：
+    查本站未停止位点 → 逐位点提交线程池任务（commit_interval ±10% 错峰）→
+    等本轮收尾汇总 → 按 update_interval ±10% 休眠（-1 表示持续更新）
+```
+
+任务内逐条入库：`works`（IntegrityError=已存在，忽略）→ `upload`（IntegrityError=已同步过，
+break）。`page_interval`（位点内翻页间隔）按站点解析后灌给脚本实例。
 
 ### 4.2 Downloader（每站点独立）
 
@@ -146,8 +153,8 @@ _site_loop：站点级 do_download 关闭即退出（恢复后守护线程重拉
 - `ConfigManager.get(dict_name, key)`：RLock；键不存在抛 `GetUnknownKey`；字符串值中的
   `${BASE_PATH}` 统一替换为工作目录。
 - `replace_section()`：系统页配置编辑的写路径（校验根节点为映射、段必须已存在、原子写盘）。
-- `site_setting(website, key)`（Downloader）：`download_sites.<website>.<key>` 覆盖
-  `download_setting.<key>`，覆盖值同样做 `${BASE_PATH}` 替换。
+- `site_setting(website, key)`（Downloader）：`download.yaml` 的 `site.<website> >
+  site.default > 代码内置兜底`，覆盖值同样做 `${BASE_PATH}` 替换。
 
 ## 6. 登录代理内部
 
@@ -173,7 +180,7 @@ _site_loop：站点级 do_download 关闭即退出（恢复后守护线程重拉
 ## 8. 测试
 
 ```bash
-python3 -m pytest tests/          # 71 例
+python3 -m pytest tests/          # 124 例
 ```
 
 | 文件 | 覆盖 |
@@ -182,9 +189,13 @@ python3 -m pytest tests/          # 71 例
 | test_dispatcher | 路由/兜底/重载安全/requirements |
 | test_config | 副本换入原子性、env 内存覆盖、replace_section、${BASE_PATH} |
 | test_queue | 认领排序/状态回写/stopped 保护/崩溃回收/缓存包装/每站隔离 |
+| test_updater | 站点级配置解析、每站点调度、产出从新到旧、page_interval 灌参 |
+| test_script_tools | 日志出口、站点地址、Selenium 装配桩测、动态注册 |
+| test_e2e | 内嵌虚拟站点 + 真实调度全链路 |
+| test_logger | 日志调用方归因（实例方法/classmethod）与月度轮转 |
 | test_query_api | 各筛选维度组合、分页、统计 |
 | test_cookie | HTML 改写、存取、save 流程 |
-| test_system_api | 脚本路由/重载/上传、配置 raw 读写 |
+| test_system_api | 脚本路由/重载/上传、配置 raw 读写、站点入口 CRUD、立即更新 |
 | test_migrations | 版本戳幂等、PRAGMA、v1→v2 旧库升级 |
 
 常用模式：`monkeypatch.setattr(ConfigManager, "base_path", str(tmp_path))` 隔离工作目录；
@@ -192,8 +203,8 @@ python3 -m pytest tests/          # 71 例
 
 ## 9. 扩展指南
 
-**接入新站点**：① 系统页编辑 `websites.yaml` 加入口 → ② Cookie 页去登录存 cookie →
-③ 系统页上传脚本（类声明 `website`，头部可声明 requirements）→ ④ 可选：`download_sites.yaml`
+**接入新站点**：① Cookie 页添加站点入口（写 `websites.yaml`）→ ② Cookie 页去登录存 cookie →
+③ 系统页上传脚本（类声明 `website`，头部可声明 requirements）→ ④ 可选：`download.yaml` 的 site 段
 加该站点的节奏覆盖。全程无需重启。
 
 **新增 REST 端点**：在对应蓝图 `_register_routes` 里加路由（错误统一 `_err` 帮助函数，

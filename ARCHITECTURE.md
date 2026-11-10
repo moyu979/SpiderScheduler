@@ -19,10 +19,10 @@ SpiderScheduler/
 │   │   └── paths.py                 # BASEPATH 下的各类路径
 │   ├── server/
 │   │   ├── rest_api.py              # Flask 服务（werkzeug make_server，后台线程，可优雅停止；托管前端页）
-│   │   ├── apis/                    # download / update / global / network / query / cookie / script / config（8 个蓝图）
+│   │   ├── apis/                    # download / update / query / cookie / script / config / website（7 个蓝图）
 │   │   └── web/index.html           # 前端单页应用（vanilla JS，无构建依赖，/ 路由直接托管）
 │   ├── service/
-│   │   ├── updater.py               # 更新调度：定期遍历发布位点 → UpdateUser 脚本 → 写 Works/Upload
+│   │   ├── updater.py               # 更新调度：巡检守护 + 每站点独立调度线程，位点 → UpdateUser 脚本 → 写 Works/Upload
 │   │   ├── downloader.py            # 下载调度：作品队列认领 → DownloadWork 脚本 → 状态回写
 │   │   └── dispatcher.py            # ScriptDispatcher：按 website 把任务路由到脚本类
 │   ├── cli/repl.py                  # 内置命令行（add-pos 等）
@@ -34,9 +34,8 @@ SpiderScheduler/
 │   │   │   ├── models.py            # PublishPos / Works / Upload（复合主键 + 延迟复合外键）
 │   │   │   └── migrations/          # 结构迁移脚本（000N_说明.py）
 │   │   ├── cookie_manager.py        # CookieManager：按 website 存取登录 cookie（datas/cookies/）
-│   │   ├── browser/                 # Selenium 辅助（暂未接线，登录代理已替代其取 cookie 职责）
 │   │   └── logging/logger.py        # SpiderLogger：按月轮转文件 + 控制台
-│   └── assets/                      # 模板：confs/（yaml 配置）、scripts/（用户脚本骨架）、datas/
+│   └── assets/                      # 模板：confs/（yaml 配置）、scripts/（用户脚本骨架）
 ├── docker/                          # BASEPATH 工作目录（运行时从 assets 生成，已被 .gitignore 忽略）
 │   ├── confs/  scripts/  datas/
 └── tests/                           # pytest：models / dispatcher / config / queue / migrations 等
@@ -143,14 +142,14 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 站点，为每个站点启动独立调度线程——各自的线程池（`update_thread`）、轮间隔
 （`update_interval`，±10% 抖动，-1 持续更新）、位点间错峰（`commit_interval`）与站点开关
 （`do_update`）。查更新本身也是爬目标站页面，因此按站点限流；站点级配置写在
-`update_sites.yaml`（键为 website，未写的键回落全局）；全局 `do_update` 是总开关。
+`update.yaml` 的 `site` 结构（解析顺序 site.<website> > site.default > 代码内置兜底）；根键 `do_update` 是总开关。
 
 **Downloader（每站点独立调度）**：守护线程周期性发现有待下载作品的站点，为每个站点
 启动独立调度线程——各自独立的线程池（`download_thread`）、轮间隔（`download_interval`，-1
 持续下载）、数量限制（`once_download_number`）、缓存与路径。站点循环内：回收中断残留 →
 按优先级认领本站任务（`state ∈ {inQueue, NULL}`）→ 认领即置 `downloading`，交线程池执行 →
 成功置 `done` 记录 `downloadDate`，异常置 `failed`（不覆盖 `stopped`）→ 轮末等任务收尾。
-站点级配置写在 `download_sites.yaml`（键为 website，未写的键回落全局），支持运行中热更新
+站点级配置写在 `download.yaml` 的 `site` 结构（解析顺序 site.<website> > site.default > 代码内置兜底），支持运行中热更新
 （线程数除外，改动后重启进程或站点线程重建时生效）；全局 `do_download` 是总开关，
 站点级 `do_download: false` 可单独关站，开关恢复后守护线程自动重新拉起。
 每站点还可配 **可下载时间窗口** `download_window`（mode: daily/weekly/monthly，start/end
@@ -165,7 +164,7 @@ HH:MM 支持跨天，weekdays: 1=周一..7=周日，month_days 支持负数 -1=�
 `cache_path/<website>/<workNumber>/`，返回产物路径后框架拷贝到最终保存路径
 `download_path/<website>/<workNumber>/` 并清理该作品缓存目录（缺产物路径视为失败）；
 `use_cache` 关时脚本直接写最终目录。两种模式脚本无感。路径根可经
-`download_sites.yaml` 按站点覆盖。
+`download.yaml` 的 site 段按站点覆盖。
 
 两个服务都有 `stop()`：置停止事件（所有 sleep 均为可唤醒的 `Event.wait`）+ 线程池
 `shutdown(wait=True, cancel_futures=True)`，Ctrl+C 时由 main 的信号处理依次调用。
@@ -179,33 +178,32 @@ HH:MM 支持跨天，weekdays: 1=周一..7=周日，month_days 支持负数 -1=�
 - **环境变量覆盖**：`字典名_键名`（大写）命中即覆盖内存值，仅内存生效、不回写文件；
   每次文件重载后重新应用，保证热重载不丢覆盖。
 - 字符串值中的 `${BASE_PATH}` 占位符在 `get()` 返回时替换为实际工作目录；
-  `database.yaml` 的 `${DB_PATH}` 由 DatabaseManager 替换。
+  `system.yaml` 的 `database_url` 由 DatabaseManager 解析（`${DB_PATH}` 占位）。
 
 关键键位（代码与 yaml 已对齐）：
 
 | 文件 | 键 | 用途 |
 |---|---|---|
-| download_setting | do_download / download_thread | 总开关 / 线程数 |
-| | once_download_number | 每轮数量限制（-1 无限） |
-| | download_interval | 轮间隔（-1 持续下载） |
-| | use_cache | 下载缓存开关（开=缓存中转+框架拷贝到最终路径） |
-| download_sites | `<website>: {键覆盖}` | 每站点独立下载配置，未写键回落全局 |
-| update_sites | `<website>: {键覆盖}` | 每站点独立更新配置（线程/间隔/错峰/站点开关） |
-| （download_setting/download_sites） | `download_window` | 每站点可下载时间窗口（daily/weekly/monthly + start/end/weekdays/month_days） |
-| download_setting | `site_scan_interval` / `window_check_interval` | 站点巡检周期（新站点发现延迟）/ 窗口外检查周期（开窗进场延迟），单位秒 |
+| download（根键） | do_download | 下载总开关（站点级开关的父开关） |
+| | site_scan_interval / window_check_interval | 站点巡检周期 / 窗口外检查周期（秒） |
+| download（site.default） | download_thread / once_download_number / download_interval | 线程数 / 每轮数量限制（-1 无限）/ 轮间隔（-1 持续下载） |
 | | waiting_play / sleep_second | 任务间节奏 |
-| | download_path / cache_path | 存储路径（支持 ${BASE_PATH}） |
-| update_setting | do_update / update_thread | 总开关 / 线程数 |
-| | update_interval / commit_interval | 轮间隔 / 位点间错峰 |
-| network | rest_api_host / rest_api_port | API 监听（当前无鉴权，勿暴露公网） |
+| | use_cache / download_path / cache_path | 缓存开关与存储路径（支持 ${BASE_PATH}） |
+| （download.site） | `download_window` | 每站点可下载时间窗口（daily/weekly/monthly + start/end/weekdays/month_days） |
+| （download.site） | `<website>: {键覆盖}` | 每站点独立下载配置（未写键回落 site.default） |
+| update（根键） | do_update | 更新总开关 |
+| update（site.default） | update_thread / update_interval / commit_interval | 线程数 / 轮间隔 / 位点间错峰 |
+| （update.site） | `<website>: {键覆盖}` | 每站点独立更新配置（含站点级 do_update 开关） |
 | websites | `<website>: 入口URL` | 各站点域名（登录代理目标、脚本可参考） |
-| global_conf | conf_reload_interval / debug | 配置热重载 / 调试 |
+| system | debug / conf_reload_interval / conf_retry_interval / console_log_level / file_log_level / database_* / rest_api_* / use_proxy / proxy_* | 运行 / 日志 / 数据库 / 网络（原 global_conf+logging+database+network 合并） |
 
 ## 数据库
 
-- SQLAlchemy 2.0 + SQLite（`database.yaml` 的 `url` 预留了换 Postgres 的写法）。
+- SQLAlchemy 2.0 + SQLite（`system.yaml` 的 `database_url` 支持填完整连接串换 Postgres 等，
+  `${DB_PATH}` 占位符代表默认 SQLite 文件路径。**schema 迁移仅支持 SQLite**——配置远程库时
+  跳过迁移并告警，需自行保证结构与当前模型一致）。
 - 连接级 PRAGMA：`journal_mode=WAL`（读写互斥降低）、`busy_timeout=30000`（并发写退避）、
-  `foreign_keys=ON`（外键强制）。`echo`、`connect_args` 由 database.yaml 配置。
+  `foreign_keys=ON`（外键强制）。`database_echo`、`database_connect_args` 由 system.yaml 配置。
 - 会话统一走 `DatabaseManager.get_db_session()` 上下文管理器（自动提交/回滚/关闭）。
   **注意：ORM 对象在会话提交后即过期，跨会话使用需在会话内转字典。**
 
@@ -226,7 +224,9 @@ HH:MM 支持跨天，weekdays: 1=周一..7=周日，month_days 支持负数 -1=�
 | POST /api/download/add_work | 作品入队（可带 downloadInfo 对象） |
 | POST /api/download/stop_work | 停止下载（state→stopped） |
 | POST /api/download/requeue_work | 重新入队（failed/stopped/done → inQueue） |
-| PUT /api/{update,download,global,network}/config | 更新对应配置段 |
+| POST /api/update/resume_pos | 恢复追踪位点（stopped → 追踪中） |
+| POST /api/update/update_now · GET /api/update/update_now/status | 立即对指定位点跑一轮更新（绕过周期调度）· 查询立即更新进度 |
+| PUT /api/{update,download}/config | 更新对应配置段 |
 | GET /api/query/works | 组合筛选作品：website/state 多选(none=NULL)/author/日期区间(upTime、downloadDate)/keyword/排序(白名单)/分页 |
 | GET /api/query/positions | 组合筛选位点：website/state/keyword/addTime 区间/分页，附每个位点的作品关联数 |
 | GET /api/query/stats | 按 website × state 计数，供前端生成筛选选项与概览条 |
@@ -240,18 +240,21 @@ HH:MM 支持跨天，weekdays: 1=周一..7=周日，month_days 支持负数 -1=�
 | GET /api/system/scripts/<kind>/source?name= · POST /api/system/scripts/upload | 按名查看 · 上传（multipart：kind+name+file[+force]）。上传前两级冲突检测——同名文件、website 与其他脚本重复——409 由用户决定覆盖（force=true）；**保存成功后立即重新扫描分发器**，新文件即刻生效，失败保留旧路由 |
 | DELETE /api/system/scripts/<kind>/<name> | 删除脚本文件并重新扫描 |
 | GET /api/system/config · GET/PUT /api/system/config/<段>/raw · POST /api/system/config/reload | 列配置段 · 以 YAML 读/写单段（写盘+内存即时生效） · 从文件整体重载 |
+| GET /api/system/websites | 站点入口列表与占用统计（作品/位点/脚本路由引用情况） |
+| PUT /api/system/websites/<name> | 新增/更新站点入口（写 websites.yaml，站点名限字母/数字/下划线/连字符） |
+| DELETE /api/system/websites/<name>?force= | 删除站点入口（仍被作品/位点/脚本路由引用时要求 force=true） |
 
 统一响应 `{success, message/error, ...}`；主键身份均为 `(id, website)`。
 
 ## 前端
 
 `src/server/web/index.html` 单文件单页应用（无框架、无构建），由 REST API 的 `/` 路由同源托管。
-功能：作品/用户双 Tab；顶部按站点×状态的统计条（点击站点名设站点筛选、点击状态 chip 切换状态多选）；
+功能：作品 / 位点 / Cookie / 系统四个 Tab；顶部按站点×状态的统计条（点击站点名设站点筛选、点击状态 chip 切换状态多选）；
 筛选维度可任意组合——站点、状态多选、作者（经 upload 关联）、日期区间（可选字段）、关键字、排序方向；
 分页与每页大小；作品行内"停止/重新入队"操作（调用对应管理 API）；筛选变更 300ms 防抖自动刷新。
-另有 Cookie 页（登录代理入口与状态）和系统页（脚本路由查看/热重载/Web 上传脚本、
-单段 YAML 配置编辑器、配置整体重载）。位点 Tab 支持在线添加位点（站点选项来自
-`websites.yaml`）和行内"停止追踪"。
+位点 Tab 支持在线添加位点（站点选项来自 `websites.yaml`）和行内"停止追踪 / 恢复追踪 / 立即更新"；
+Cookie 页提供登录代理入口与状态，以及站点入口在线增删改（写 `websites.yaml`）；
+系统页提供脚本路由查看/热重载/Web 上传脚本、单段 YAML 配置编辑器、配置整体重载。
 
 ## 初始化与生命周期
 
@@ -286,13 +289,14 @@ docker compose up -d --build     # 首次启动自动在卷里 bootstrap 配置�
 # docker stop 会触发 SIGINT 优雅退出，等池内任务收尾（宽限期 compose 里给了 1 分钟）
 ```
 
-注意：镜像内不需要 Chrome（`utils/browser/` 未接线，登录走代理）；健康检查固定探测 8300，
-改端口需同步改 compose 和 `/data/confs/network.yaml`。
+注意：镜像内不需要 Chrome（登录走代理，无浏览器依赖）；健康检查固定探测 8300，
+改端口需同步改 compose 和 `/data/confs/system.yaml`。
 
 ## 已知未接线 / 待办
 
-- `once_download_size` / `once_download_duration`、`once_update_duration` 配置键存在但无逻辑。
-- 全局统一节奏（线程数、间隔不区分站点）——待工作流稳定后做 per-site 覆盖。
-- `utils/browser/`（Selenium）暂未接线（initer.py 依赖的旧配置键已清理，启用前需重写）；登录代理只改写
-  服务端返回的 HTML 文本，站点若用 JS 拼绝对 URL 跳转或强 CSP，可能需要针对性适配（有 404 Referer 救援兜底）。
-- REST API 无鉴权。
+- size/duration 类下载限制（`once_download_size` / `once_download_duration`、`once_update_duration`）
+  未实现；实现时需把相应配置键加回（当前 yaml 已清理）。
+- `download_thread` 热改不生效（站点线程池在启动时建好），改后需重启进程。
+- 登录代理只改写服务端返回的 HTML 文本，站点若用 JS 拼绝对 URL 跳转或强 CSP，可能需要针对性适配
+  （有 404 Referer 救援兜底）。
+- REST API 无鉴权（仅限内网使用）；cookie 文件为明文 JSON，靠工作目录权限保护。

@@ -72,7 +72,7 @@ documented in the [User Guide](user-guide.en.md) and the [Dev Guide](dev-guide.e
 SpiderScheduler/
 ├── main.py            # entry point (--repl CLI, --basepath work directory)
 ├── src/               # schedulers, APIs, frontend, infrastructure
-├── tests/             # pytest suite (71 cases)
+├── tests/             # pytest suite (124 cases)
 ├── docker/            # default work directory (runtime data, not committed)
 ├── docs/              # this documentation
 ├── Dockerfile / docker-compose.yml / .dockerignore

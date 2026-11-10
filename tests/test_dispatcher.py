@@ -1,3 +1,5 @@
+"""ScriptDispatcher 测试：website 路由、兜底、失败重载保路由与依赖声明解析。
+"""
 import pytest
 
 from src.service.dispatcher import (

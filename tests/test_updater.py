@@ -31,8 +31,10 @@ def db(tmp_path):
 def clean_config():
     saved = dict(ConfigManager.config_dict)
     ConfigManager.config_dict.clear()
-    ConfigManager.config_dict["update_setting"] = {
-        "do_update": True, "update_thread": 1, "update_interval": 3600, "commit_interval": 0,
+    ConfigManager.config_dict["update"] = {
+        "do_update": True,
+        "site": {"default": {"update_thread": 1, "update_interval": 3600,
+                             "commit_interval": 0}},
     }
     yield
     ConfigManager.config_dict.clear()
@@ -40,12 +42,11 @@ def clean_config():
 
 
 def test_site_setting_overrides_and_falls_back():
-    ConfigManager.config_dict["update_sites"] = {
-        "pixiv": {"update_thread": 3, "update_interval": -1},
-    }
+    # 只加站点段，保留 fixture 预置的 site.default
+    ConfigManager.config_dict["update"]["site"]["pixiv"] = {"update_thread": 3, "update_interval": -1}
     assert Updater.site_setting("pixiv", "update_thread") == 3       # 站点覆盖
-    assert Updater.site_setting("danbooru", "update_thread") == 1    # 未配置回落全局
-    assert Updater.site_setting("pixiv", "commit_interval") == 0     # 站点段未写的键回落全局
+    assert Updater.site_setting("danbooru", "update_thread") == 1    # 未配置回落 default
+    assert Updater.site_setting("pixiv", "commit_interval") == 0     # 站点段未写的键回落 default
 
 
 def test_pending_positions_per_site(db):
@@ -130,3 +131,105 @@ def test_incremental_stop_at_first_known_link(db):
     assert processed == 1   # new 入库后撞到 old → 停止
     with DatabaseManager.get_db_session() as s:
         assert s.query(Works).count() == 2   # old + new；older 未被处理
+
+
+def test_update_position_injects_page_interval(db, tmp_path, monkeypatch):
+    """框架把解析好的翻页间隔灌给 updater 脚本：站点覆盖优先于 default"""
+    from src.service.dispatcher import ScriptDispatcher
+
+    ConfigManager.config_dict["update"] = {
+        "do_update": True,
+        "site": {"default": {"page_interval": 5}, "pixiv": {"page_interval": 3.5}},
+    }
+    probe = tmp_path / "probe.txt"
+    monkeypatch.setenv("PAGE_INTERVAL_PROBE", str(probe))
+    script = tmp_path / "probe_updater.py"
+    script.write_text('''
+import os
+
+
+class ProbeUpdater:
+    website = "pixiv"
+    cookie_manager = None
+
+    def __init__(self, usr, logging):
+        self.website = usr.get("website")
+
+    def __iter__(self):
+        # 记录框架注入的翻页间隔后立即结束迭代（0 作品）
+        with open(os.environ["PAGE_INTERVAL_PROBE"], "w") as f:
+            f.write(str(self.page_interval))
+        return iter(())
+''', encoding='utf-8')
+
+    u = Updater()
+    u.dispatcher = ScriptDispatcher(sources=[str(script)], fallback_class_name="NoSuchClass")
+    pos = {"authorId": "a", "website": "pixiv", "addTime": "t"}
+    assert u._update_position(pos) == 0
+    assert probe.read_text() == "3.5"      # 站点覆盖优先
+
+    # 撤掉站点覆盖 → 回落 site.default
+    ConfigManager.config_dict["update"]["site"]["pixiv"].pop("page_interval")
+    probe.write_text("")
+    assert u._update_position(pos) == 0
+    assert probe.read_text() == "5.0"
+
+
+# ---------- 立即更新（绕过轮次调度） ----------
+
+def _wait_status(u, key, timeout=5):
+    """轮询等待立即更新任务离开 running 态，返回最终状态"""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        st = u.manual_status().get(key)
+        if st and st["state"] != "running":
+            return st
+        time.sleep(0.05)
+    return u.manual_status().get(key)
+
+
+def test_update_position_now_runs_and_records(db, tmp_path):
+    from src.service.dispatcher import ScriptDispatcher
+    from src.utils.database.models import Upload, Works
+
+    with DatabaseManager.get_db_session() as s:
+        s.add(PublishPos(authorId="a", website="pixiv", state="inQueue"))
+    script = tmp_path / "now_updater.py"
+    script.write_text('''
+class NowUpdater:
+    website = "pixiv"
+    cookie_manager = None
+
+    def __init__(self, usr, logging):
+        self.website = usr.get("website")
+        self.author_id = usr.get("authorId")
+
+    def __iter__(self):
+        return iter([{"workid": "NOW1", "title": "t", "kind": "normal",
+                      "upTime": "", "state": None, "downloadPriority": 0}])
+''', encoding='utf-8')
+    u = Updater()
+    u.dispatcher = ScriptDispatcher(sources=[str(script)], fallback_class_name="NoSuchClass")
+
+    result = u.update_position_now("pixiv", "a")
+    assert result["started"] is True
+    status = _wait_status(u, "pixiv|a")
+    assert status["state"] == "done" and status["added"] == 1
+
+    with DatabaseManager.get_db_session() as s:
+        work = s.get(Works, ("NOW1", "pixiv"))
+        assert work is not None
+        assert s.get(Upload, ("pixiv", "a", "NOW1")) is not None
+        # downloadInfo：作者 + 作品号（对 bilibili 即作者 + BV 号）
+        import json
+        assert json.loads(work.downloadInfo) == {"authorId": "a", "workNumber": "NOW1"}
+
+
+def test_update_position_now_validations(db):
+    with DatabaseManager.get_db_session() as s:
+        s.add(PublishPos(authorId="b", website="pixiv", state="stopped"))
+
+    u = Updater()
+    assert u.update_position_now("pixiv", "ghost")["reason"] == "not_found"
+    assert u.update_position_now("pixiv", "b")["reason"] == "stopped"

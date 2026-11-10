@@ -2,7 +2,9 @@
 
 更新本质上是重新爬取目标站的页面，因此与下载一样**按站点独立限流**：每个站点
 拥有独立的调度线程、线程池（update_thread）、轮间隔（update_interval）与位点间
-错峰（commit_interval），互不干扰。
+错峰（commit_interval），互不干扰。站点级配置统一写在 update.yaml 的
+`site` 结构下（键为 website，解析顺序 site.<website> > site.default > 代码
+内置兜底）；根键 do_update 是全局总开关。
 
 每轮：查询该站点全部未停止的位点，把每个位点交给按 website 分发的 UpdateUser
 脚本；脚本逐条产出作品，这里负责入库（works）并建立作者↔作品关联（upload）。
@@ -13,15 +15,17 @@
 
 import json
 import random
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from threading import Event, Lock, Thread
 
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
-from src.config.config import ConfigManager
+from src.config.config import ConfigManager, GetUnknownKey, _UNSET
 from src.config.paths import update_script_sources
 from src.service.dispatcher import ScriptDispatcher
+from src.service.script_tools import ScriptTools
 from src.utils.logging.logger import SpiderLogger as logger
 from src.utils.threadPool.threadPool import ThreadPool
 from src.utils.database.database import DatabaseManager
@@ -35,8 +39,9 @@ class Updater:
     站点模型：守护线程周期性发现有未停止位点的站点，为每个站点启动独立的
     调度线程——各自的线程池（update_thread）、轮间隔（update_interval）、位点间
     错峰（commit_interval）与站点开关（do_update），互不干扰。站点级配置写在
-    update_sites.yaml（键为 website，未写出的键回落全局 update_setting.yaml）；
-    全局 do_update 是总开关，站点级 do_update 可单独关闭某站点。
+    update.yaml 的 `site` 结构下（键为 website，解析顺序 site.<website> >
+    site.default > 代码内置兜底）；根键 do_update 是全局总开关，站点级
+    do_update 可单独关闭某站点。
 
     Attributes:
         dispatcher: 按 website 路由到 UpdateUser 脚本类的分发器。
@@ -50,17 +55,42 @@ class Updater:
 
     # 站点巡检周期（秒）：发现有未停止位点的站点并拉起其调度线程的频率
     SUPERVISOR_TICK = 5
+    # update_interval / commit_interval / page_interval 的内置默认值（配置缺失或非法时使用）
+    UPDATE_INTERVAL_DEFAULT = 86400
+    COMMIT_INTERVAL_DEFAULT = 5
+    PAGE_INTERVAL_DEFAULT = 5
 
     def __init__(self):
         self.dispatcher = None
         self._stop_event = Event()
         self._runners = {}   # website -> 调度线程
         self._pools = {}     # website -> ThreadPool
+        # “立即更新”专用：与轮次调度解耦的小执行器 + 防重复与状态登记
+        self._manual_executor = None
+        self._manual_lock = Lock()
+        self._manual_running = set()   # {(website, authorId)}
+        self._manual_status = {}       # {"website|authorId": {state, added, error, finishedAt}}
 
     @staticmethod
-    def site_setting(website, key):
-        """站点级更新配置：update_sites.<website>.<key> 覆盖 update_setting.<key>"""
-        return ConfigManager.site_setting('update_sites', 'update_setting', website, key)
+    def site_setting(website, key, default=_UNSET):
+        """站点级更新配置：update.yaml 的 site.<website> > site.default > 代码兜底。
+
+        Args:
+            website: 站点名。
+            key: 配置键。
+            default: 全链未配置时的代码级兜底值（缺省则抛 GetUnknownKey）。
+        """
+        return ConfigManager.site_setting('update', website, key, default)
+
+    @classmethod
+    def _seconds(cls, website, key, default):
+        """秒数型站点配置解析：-1 保留（表示不限/不等待），其余最小 1 秒；
+        键缺失或非数值时用内置默认值，避免字符串配置在算术处抛 TypeError。"""
+        try:
+            value = int(cls.site_setting(website, key))
+        except (GetUnknownKey, TypeError, ValueError):
+            return default
+        return value if value == -1 else max(1, value)
 
     def init(self):
         """初始化分发器（不启动调度线程，由 start() 负责）。"""
@@ -81,6 +111,8 @@ class Updater:
         self._stop_event.set()
         for pool in list(self._pools.values()):
             pool.shutdown(wait=True, cancel_futures=True)
+        if self._manual_executor is not None:
+            self._manual_executor.shutdown(wait=False, cancel_futures=True)
         logger.info("Updater 已停止")
 
     # ---------------- 站点巡检与站点调度线程 ----------------
@@ -90,10 +122,10 @@ class Updater:
         while not self._stop_event.is_set():
             try:
                 # 全局总开关关闭时不拉起任何站点
-                if ConfigManager.get('update_setting', 'do_update'):
+                if ConfigManager.get('update', 'do_update'):
                     for website in self._update_sites():
-                        # 站点级开关关闭的站点不启动
-                        if website not in self._runners and self.site_setting(website, 'do_update'):
+                        # 站点级开关关闭的站点不启动（未配置视为开启）
+                        if website not in self._runners and self.site_setting(website, 'do_update', True):
                             self._start_site_runner(website)
             except Exception as e:
                 logger.error(f"更新站点巡检异常: {e}")
@@ -126,7 +158,7 @@ class Updater:
     def _site_runner(self, website):
         """站点调度线程入口：装配站点专属线程池，退出时清理。"""
         pool = ThreadPool(
-            max_workers=self.site_setting(website, 'update_thread'),
+            max_workers=self.site_setting(website, 'update_thread', 1),
             name=f"Update-{website}",
         )
         self._pools[website] = pool
@@ -150,8 +182,8 @@ class Updater:
         """
         while not self._stop_event.is_set():
             # 站点级/全局开关关闭 → 退出本站调度线程，恢复后由守护线程重新拉起
-            if not ConfigManager.get('update_setting', 'do_update') \
-                    or not self.site_setting(website, 'do_update'):
+            if not ConfigManager.get('update', 'do_update') \
+                    or not self.site_setting(website, 'do_update', True):
                 logger.info(f"站点 {website} 更新已关闭，调度线程退出")
                 return
 
@@ -163,7 +195,7 @@ class Updater:
                 total_positions = 0
                 total_works = 0
                 counter_lock = Lock()
-                commit_interval = self.site_setting(website, 'commit_interval')
+                commit_interval = self._seconds(website, 'commit_interval', self.COMMIT_INTERVAL_DEFAULT)
 
                 for idx, pos in enumerate(positions, start=1):
                     if self._stop_event.is_set():
@@ -193,7 +225,7 @@ class Updater:
                 self._stop_event.wait(timeout=5)
 
             # 轮间隔（-1 表示持续更新）；每次轮末重读，配置热更新即时生效
-            interval = self.site_setting(website, 'update_interval')
+            interval = self._seconds(website, 'update_interval', self.UPDATE_INTERVAL_DEFAULT)
             if interval == -1:
                 logger.info(f"[{website}] 更新间隔为 -1，立即开始下一轮")
             else:
@@ -242,6 +274,18 @@ class Updater:
         update_user_class = self.dispatcher.get(pos_snapshot.get('website'))
         updater_instance = update_user_class(pos_snapshot, logger)
         updater_instance.cookie_manager = CookieManager
+        # 运行时工具集：站点绑定的日志/登录态浏览器(自动应用代理)/扩展注册入口
+        updater_instance.tools = ScriptTools(website=pos_snapshot.get('website'))
+        # 翻页限速（秒）：update.yaml 的 site.<website>.page_interval（站点可覆盖，
+        # 未配置回落 PAGE_INTERVAL_DEFAULT）。翻页由脚本控制，框架把解析好的值
+        # 灌给脚本，脚本在两次取页之间自行等待；纯 API 站点可忽略。
+        try:
+            page_interval = max(0.0, float(
+                self.site_setting(pos_snapshot.get('website'), 'page_interval',
+                                  self.PAGE_INTERVAL_DEFAULT)))
+        except (TypeError, ValueError):
+            page_interval = float(self.PAGE_INTERVAL_DEFAULT)
+        updater_instance.page_interval = page_interval
 
         author_id = pos_snapshot.get('authorId')
         website = pos_snapshot.get('website')
@@ -266,13 +310,21 @@ class Updater:
             works_data = {
                 'workNumber': work_number,
                 'website': website,
-                'upTime': item.get('upTime'),
+                # 缺省回落到与 add_work API / 模型默认一致（""/0），避免 NULL 与
+                # 具体值混存导致排序、展示口径不一致
+                'upTime': item.get('upTime') or '',
                 'title': item.get('title'),
                 'kind': item.get('kind'),
                 'state': 'inQueue',
                 'downloadDate': item.get('downloadDate'),
-                'downloadPriority': item.get('downloadPriority'),
+                'downloadPriority': item.get('downloadPriority') or 0,
                 'otherInfo': other_info,
+                # 统一下载参数：作者 + 作品号（对 bilibili 即作者 + BV 号），
+                # 下载脚本经 download_info 按需取用（如按作者归档）。
+                # 仅在新建作品时写入，不覆盖用户经 add_work 手工填写的参数。
+                'downloadInfo': json.dumps(
+                    {'authorId': author_id, 'workNumber': work_number},
+                    ensure_ascii=False),
             }
 
             # 先查关联：已存在说明该位点已同步到这里，直接停止本位点迭代。
@@ -310,6 +362,73 @@ class Updater:
 
         logger.info(f"位点 {author_id}@{website} 同步完成，新增作品数: {processed}")
         return processed
+
+    # ---------------- 立即更新（单位点，绕过轮次调度） ----------------
+
+    def _manual_pool(self):
+        """懒加载“立即更新”专用执行器（与站点调度池解耦，站点未运行时也可用）。"""
+        if self._manual_executor is None:
+            self._manual_executor = ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="UpdateNow")
+        return self._manual_executor
+
+    def update_position_now(self, website, author_id):
+        """立即更新单个位点：后台执行一次 _update_position，不等待轮次调度。
+
+        与轮次调度可能并发处理同一位点——增量同步语义（upload 关联已存在即停）
+        使重复处理无害；同一“立即更新”重复点击会被在途登记挡下。
+
+        Args:
+            website: 站点名。
+            author_id: 作者标识。
+
+        Returns:
+            dict: {"started": bool}；started=False 时附 reason
+            （not_found / stopped / already_running）与用户可读的 error。
+        """
+        with DatabaseManager.get_db_session() as session:
+            pos = session.get(PublishPos, (author_id, website))
+            if pos is None:
+                return {"started": False, "reason": "not_found",
+                        "error": f"位点不存在: {author_id}@{website}"}
+            if (pos.state or "inQueue") == "stopped":
+                return {"started": False, "reason": "stopped",
+                        "error": "位点已停止追踪，请先恢复追踪再更新"}
+            snapshot = {"authorId": pos.authorId, "website": pos.website,
+                        "addTime": pos.addTime}
+
+        key = (website, author_id)
+        status_key = f"{website}|{author_id}"
+        with self._manual_lock:
+            if key in self._manual_running:
+                return {"started": False, "reason": "already_running",
+                        "error": "该位点正在更新中"}
+            self._manual_running.add(key)
+        self._manual_status[status_key] = {"state": "running", "added": 0, "error": None}
+
+        def _run():
+            """执行单位点同步并登记结果（供前端轮询）。"""
+            try:
+                added = self._update_position(snapshot)
+                self._manual_status[status_key] = {
+                    "state": "done", "added": added, "error": None,
+                    "finishedAt": datetime.now().isoformat(timespec="seconds")}
+            except Exception as e:
+                logger.error(f"立即更新失败 {author_id}@{website}: {e}")
+                self._manual_status[status_key] = {
+                    "state": "failed", "added": 0, "error": str(e),
+                    "finishedAt": datetime.now().isoformat(timespec="seconds")}
+            finally:
+                with self._manual_lock:
+                    self._manual_running.discard(key)
+
+        self._manual_pool().submit(_run)
+        logger.info(f"立即更新已提交: {author_id}@{website}")
+        return {"started": True}
+
+    def manual_status(self):
+        """“立即更新”的状态快照（键为 "website|authorId"，供前端轮询）。"""
+        return {k: dict(v) for k, v in self._manual_status.items()}
 
 
 updater = Updater()

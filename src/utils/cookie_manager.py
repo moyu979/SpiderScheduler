@@ -40,11 +40,16 @@ class CookieManager:
 
     @classmethod
     def save(cls, website: str, cookies: list) -> int:
-        """覆盖保存指定 website 的 cookie 列表，返回条数"""
+        """覆盖保存指定 website 的 cookie 列表，返回条数。
+
+        先写临时文件再原子替换，调度线程并发读取（get/get_header）不会看到半截 JSON。
+        """
         os.makedirs(cookies_path(), exist_ok=True)
         path = cls._cookie_file(website)
-        with open(path, 'w', encoding='utf-8') as f:
+        tmp_path = path + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(list(cookies or []), f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
         logger.info(f"已保存 {website} 的 cookie 共 {len(cookies or [])} 条: {path}")
         return len(cookies or [])
 

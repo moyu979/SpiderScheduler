@@ -204,12 +204,20 @@ class ScriptApi:
             kind = request.form.get('kind')
             if kind not in _SCRIPT_TARGETS:
                 return _err(f"未知脚本类型: {kind}（可选: {', '.join(_SCRIPT_TARGETS)}）")
-            name = (request.form.get('name') or '').strip().removesuffix('.py')
-            if not name or not _NAME_RE.match(name):
-                return _err("缺少或非法的文件名（name，仅字母/数字/下划线/连字符）")
             file = request.files.get('file')
             if file is None or not file.filename:
                 return _err("缺少上传文件（multipart 字段名 file）")
+            # 目标保存名（决定存成 scripts/<kind>/<name>.py）：显式指定优先；
+            # 留空时从上传文件名派生（取基名、去 .py、非法字符折叠为 _）。
+            # 白名单只约束这个保存名——上传的 .py 文件本身不受限制。
+            name = (request.form.get('name') or '').strip().removesuffix('.py')
+            if not name:
+                base = os.path.basename(file.filename).removesuffix('.py')
+                name = re.sub(r'[^A-Za-z0-9_\-]+', '_', base).strip('_')
+            if not name or not _NAME_RE.match(name):
+                return _err("目标保存名（name，不含 .py）只能包含字母/数字/下划线/连字符——"
+                            "上传的 .py 文件本身不受此限制；文件名含中文等字符时，"
+                            "请在“文件名”输入框手动指定保存名")
             raw = file.read()
             if len(raw) > MAX_SCRIPT_SIZE:
                 return _err(f"脚本过大（上限 {MAX_SCRIPT_SIZE // 1024} KB）")

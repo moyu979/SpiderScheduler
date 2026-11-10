@@ -1,12 +1,22 @@
+"""系统管理 API 测试：配置段读写、脚本上传/冲突检测/删除。
+"""
 import pytest
 from flask import Flask
+
+from flask import Flask
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from src.config.config import ConfigManager
 from src.server.apis.script_api import ScriptApi
 from src.server.apis.config_api import ConfigApi
+from src.server.apis.website_api import WebsitesApi
+from src.server.apis.update_api import UpdateApi
 from src.service.dispatcher import ScriptDispatcher
 from src.service.downloader import downloader
 from src.service.updater import updater
+from src.utils.database.database import DatabaseManager
+from src.utils.database.models import Base, Works
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +38,22 @@ def client():
     app = Flask(__name__)
     app.register_blueprint(ScriptApi().blueprint)
     app.register_blueprint(ConfigApi().blueprint)
+    app.register_blueprint(WebsitesApi().blueprint)
+    app.register_blueprint(UpdateApi().blueprint)
     return app.test_client()
+
+
+@pytest.fixture()
+def db(tmp_path):
+    """把 DatabaseManager 指到临时库（占用统计要用）"""
+    engine = create_engine(f"sqlite:///{tmp_path / 'web.db'}")
+    Base.metadata.create_all(engine)
+    DatabaseManager.engine = engine
+    DatabaseManager.SessionLocal = sessionmaker(bind=engine)
+    yield engine
+    DatabaseManager.engine = None
+    DatabaseManager.SessionLocal = None
+    engine.dispose()
 
 
 def _install_dispatcher(monkeypatch, tmp_path, target, name):
@@ -270,10 +295,12 @@ def test_upload_rejects_bad_input(client):
     assert resp.status_code == 400
 
     import io
+    # name 留空 → 从上传文件名派生（新语义：合法文件名即可上传）
     resp = client.post("/api/system/scripts/upload",
                        data={"kind": "download", "file": (io.BytesIO(b"x = 1\n"), "s.py")},
                        content_type="multipart/form-data")
-    assert resp.status_code == 400  # 缺 name
+    assert resp.status_code == 200
+    assert resp.get_json()["saved_path"].endswith("scripts/download/s.py")
 
     resp = client.post("/api/system/scripts/upload",
                        data={"kind": "download", "name": "a b", "file": (io.BytesIO(b"x=1\n"), "s.py")},
@@ -285,3 +312,180 @@ def test_upload_rejects_bad_input(client):
                        content_type="multipart/form-data")
     assert resp.status_code == 400
     assert "UTF-8" in resp.get_json()["error"]
+
+
+# ---------- 站点入口管理（websites.yaml 线上配置） ----------
+
+def _seed_sites(**sites):
+    ConfigManager.config_dict["websites"] = dict(sites)
+
+
+def test_websites_list_and_usage(client, db, monkeypatch, tmp_path):
+    _seed_sites(pixiv="https://www.pixiv.net", ghost="https://ghost.example.com")
+    _install_dispatcher(monkeypatch, tmp_path, downloader, "ghost")
+    with DatabaseManager.get_db_session() as session:
+        session.add(Works(workNumber="W1", website="pixiv", state="inQueue"))
+
+    data = client.get("/api/system/websites").get_json()
+    assert data["success"] and data["sites"]["pixiv"] == "https://www.pixiv.net"
+    # 占用统计：DB 占用 + 显式脚本路由（兜底不计）
+    assert data["usage"]["pixiv"]["works"] == 1
+    assert data["usage"]["ghost"]["routes"] == ["download"]
+
+
+def test_website_put_creates_and_updates(client):
+    _seed_sites()
+    # 新增
+    resp = client.put("/api/system/websites/bilibili",
+                      json={"url": "https://www.bilibili.com"})
+    body = resp.get_json()
+    assert resp.status_code == 200 and body["created"] is True
+    assert ConfigManager.config_dict["websites"]["bilibili"] == "https://www.bilibili.com"
+    # 落盘校验（_save_config 保持既有格式：无预置文件时写 json，有模板时写回 yaml）
+    import pathlib
+    confs = pathlib.Path(ConfigManager.base_path) / "confs"
+    saved = confs / "websites.yaml"
+    if not saved.exists():
+        saved = confs / "websites.json"
+    assert "bilibili" in saved.read_text(encoding="utf-8")
+    # 更新（同一入口是修改而非新增）
+    resp = client.put("/api/system/websites/bilibili",
+                      json={"url": "https://m.bilibili.com"})
+    assert resp.get_json()["created"] is False
+    assert ConfigManager.config_dict["websites"]["bilibili"] == "https://m.bilibili.com"
+
+
+def test_website_put_validates_name_and_url(client):
+    _seed_sites()
+    # 空名与含斜杠名无法经路由到达（Werkzeug 不匹配空段/编码斜杠），
+    # 其余非法名经 percent-encoding 到达，由 API 校验拒绝
+    for name in ("bad name", "站点", "a.b"):
+        from urllib.parse import quote
+        resp = client.put(f"/api/system/websites/{quote(name, safe='')}", json={"url": "https://x.com"})
+        assert resp.status_code == 400, name
+    resp = client.put("/api/system/websites/ok", json={"url": "ftp://x.com"})
+    assert resp.status_code == 400
+    resp = client.put("/api/system/websites/ok", json={"url": ""})
+    assert resp.status_code == 400
+    # 非法输入不得写入
+    assert ConfigManager.config_dict["websites"] == {}
+
+
+def test_website_delete_with_usage_guard(client, db, monkeypatch, tmp_path):
+    _seed_sites(pixiv="https://www.pixiv.net")
+    with DatabaseManager.get_db_session() as session:
+        session.add(Works(workNumber="W1", website="pixiv", state="inQueue"))
+
+    # 被作品引用 → 409 + 占用明细
+    resp = client.delete("/api/system/websites/pixiv")
+    assert resp.status_code == 409
+    body = resp.get_json()
+    assert body["usage"]["works"] == 1
+    assert ConfigManager.config_dict["websites"]["pixiv"]  # 未被删除
+
+    # force=true → 删除成功
+    resp = client.delete("/api/system/websites/pixiv?force=true")
+    assert resp.status_code == 200
+    assert "pixiv" not in ConfigManager.config_dict["websites"]
+
+
+def test_website_delete_unused_and_missing(client, db):
+    _seed_sites(empty="https://empty.example.com")
+    # 未被引用 → 直接删除
+    resp = client.delete("/api/system/websites/empty")
+    assert resp.status_code == 200
+    # 不存在的站点 → 404
+    resp = client.delete("/api/system/websites/ghost")
+    assert resp.status_code == 404
+
+
+# ---------- 上传保存名派生 ----------
+
+def test_upload_derives_name_from_filename(client, monkeypatch):
+    """name 留空时从上传文件名派生保存名（空格折叠为下划线，去 .py）"""
+    import io
+    import pathlib
+    resp = client.post("/api/system/scripts/upload",
+                       data={"kind": "update",
+                             "file": (io.BytesIO(b'class X:\n    website = "d"\n'),
+                                      "my script.py")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    body = resp.get_json()
+    assert body["saved_path"].endswith("scripts/update/my_script.py")
+    assert pathlib.Path(body["saved_path"]).exists()
+
+
+def test_upload_undeliverable_filename_requires_manual_name(client):
+    """上传文件名含非 ASCII 且未指定 name → 400 并给出手动指定指引"""
+    import io
+    resp = client.post("/api/system/scripts/upload",
+                       data={"kind": "update",
+                             "file": (io.BytesIO(b'class X:\n    pass\n'), "我的脚本.py")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert "手动指定保存名" in resp.get_json()["error"]
+
+
+def test_upload_explicit_name_overrides_filename(client):
+    """显式 name 优先于上传文件名派生"""
+    import io
+    import pathlib
+    resp = client.post("/api/system/scripts/upload",
+                       data={"kind": "update", "name": "explicit",
+                             "file": (io.BytesIO(b'class X:\n    website = "e"\n'),
+                                      "whatever name.py")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 200
+    assert resp.get_json()["saved_path"].endswith("scripts/update/explicit.py")
+
+
+# ---------- 立即更新 API ----------
+
+def test_update_now_api(client, db, monkeypatch, tmp_path):
+    import io
+    import pathlib
+    import time
+
+    from src.utils.database.models import PublishPos
+
+    with DatabaseManager.get_db_session() as session:
+        session.add(PublishPos(authorId="a", website="pixiv", state="inQueue"))
+
+    script = tmp_path / "api_now_updater.py"
+    script.write_text('''
+class ApiNowUpdater:
+    website = "pixiv"
+    cookie_manager = None
+
+    def __init__(self, usr, logging):
+        self.website = usr.get("website")
+        self.author_id = usr.get("authorId")
+
+    def __iter__(self):
+        return iter([{"workid": "APINOW1", "title": "t", "kind": "normal",
+                      "upTime": "", "state": None, "downloadPriority": 0}])
+''', encoding='utf-8')
+    d = ScriptDispatcher(lambda: [str(script)], fallback_class_name="Fallback")
+    monkeypatch.setattr(updater, "dispatcher", d)
+
+    # 不存在的位点 → 404
+    resp = client.post("/api/update/update_now", json={"authorId": "ghost", "website": "pixiv"})
+    assert resp.status_code == 404
+
+    # 受理 → 轮询状态端点直到 done
+    resp = client.post("/api/update/update_now", json={"authorId": "a", "website": "pixiv"})
+    assert resp.status_code == 200 and resp.get_json()["started"] is True
+
+    deadline = time.time() + 5
+    statuses = {}
+    while time.time() < deadline:
+        statuses = client.get("/api/update/update_now/status").get_json()["statuses"]
+        st = statuses.get("pixiv|a")
+        if st and st["state"] != "running":
+            break
+        time.sleep(0.05)
+    assert statuses["pixiv|a"]["state"] == "done" and statuses["pixiv|a"]["added"] == 1
+
+    with DatabaseManager.get_db_session() as session:
+        assert session.get(Works, ("APINOW1", "pixiv")) is not None

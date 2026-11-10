@@ -1,3 +1,5 @@
+"""下载队列测试：认领/收尾/重排语义、缓存交付、时间窗口与线程池行为。
+"""
 import os
 from datetime import datetime
 from threading import Thread
@@ -7,7 +9,7 @@ from flask import Flask
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.config.config import ConfigManager
+from src.config.config import ConfigManager, GetUnknownKey
 from src.utils.threadPool.threadPool import ThreadPool
 
 from src.service.downloader import Downloader
@@ -157,15 +159,17 @@ class FakeDispatcher:
 def cache_env(tmp_path, monkeypatch):
     final_root = tmp_path / "final"
     cache_root = tmp_path / "cache"
-    ConfigManager.config_dict["download_setting"] = {
-        "use_cache": True,
-        "download_path": str(final_root),
-        "cache_path": str(cache_root),
-        "waiting_play": False,
-        "sleep_second": 0,
+    ConfigManager.config_dict["download"] = {
+        "site": {"default": {
+            "use_cache": True,
+            "download_path": str(final_root),
+            "cache_path": str(cache_root),
+            "waiting_play": False,
+            "sleep_second": 0,
+        }},
     }
     yield {"final": final_root, "cache": cache_root}
-    ConfigManager.config_dict.pop("download_setting", None)
+    ConfigManager.config_dict.pop("download", None)
 
 
 def _run_with(d, worker, monkeypatch, work_number="W", website="pixiv"):
@@ -186,7 +190,7 @@ def test_cache_on_copies_to_final_and_cleans(db, cache_env, monkeypatch):
 
 
 def test_cache_off_writes_final_directly(db, cache_env, monkeypatch):
-    ConfigManager.config_dict["download_setting"]["use_cache"] = False
+    ConfigManager.config_dict["download"]["site"]["default"]["use_cache"] = False
     _add(workNumber="W", website="pixiv", state="downloading")
     d = Downloader()
     _run_with(d, FakeWorker, monkeypatch)
@@ -210,23 +214,38 @@ def test_unsafe_work_subdir_sanitized():
 
 # ---------- 每站点独立配置 ----------
 
-def test_site_setting_overrides_and_falls_back():
-    ConfigManager.config_dict["download_setting"] = {
-        "sleep_second": 10,
-        "waiting_play": False,
-        "download_path": "./global/${BASE_PATH}/dl",
+def test_site_setting_site_overrides_default():
+    """两层回落：site.<website> > site.default"""
+    ConfigManager.config_dict["download"] = {
+        "site": {
+            "default": {"sleep_second": 7, "waiting_play": False,
+                        "download_path": "./def/${BASE_PATH}/dl"},
+            "pixiv": {"sleep_second": 3, "download_path": "./site/${BASE_PATH}/dl"},
+        },
     }
-    ConfigManager.config_dict["download_sites"] = {
-        "pixiv": {"sleep_second": 3, "download_path": "./site/${BASE_PATH}/dl"},
-    }
-    # 站点段覆盖
+    # 站点段最优先
     assert Downloader.site_setting("pixiv", "sleep_second") == 3
-    # 未配置的站点回落全局
-    assert Downloader.site_setting("danbooru", "sleep_second") == 10
-    # 站点段未写的键回落全局
+    # 未单独配置的站点回落 default
+    assert Downloader.site_setting("danbooru", "sleep_second") == 7
+    # 站点段未写的键回落 default
     assert Downloader.site_setting("pixiv", "waiting_play") is False
-    # 覆盖值同样做 ${BASE_PATH} 替换
+    assert Downloader.site_setting("danbooru", "waiting_play") is False
+    # 两层的覆盖值同样做 ${BASE_PATH} 替换
     assert Downloader.site_setting("pixiv", "download_path") == f"./site/{ConfigManager.base_path}/dl"
+    assert Downloader.site_setting("danbooru", "download_path") == f"./def/{ConfigManager.base_path}/dl"
+
+
+def test_site_setting_code_fallback():
+    """三层兜底：site.<website> > site.default > 代码内置默认值（default 参数）"""
+    ConfigManager.config_dict["download"] = {"site": {"pixiv": {}}}
+    # 两层全缺 + 给 default → 返回代码兜底值，不抛异常
+    assert Downloader.site_setting("pixiv", "sleep_second", 10) == 10
+    # 两层全缺 + 未给 default → GetUnknownKey（带定位信息）
+    with pytest.raises(GetUnknownKey):
+        Downloader.site_setting("pixiv", "sleep_second")
+    # 低层有值时代码兜底不生效
+    ConfigManager.config_dict["download"]["site"]["default"] = {"sleep_second": 7}
+    assert Downloader.site_setting("pixiv", "sleep_second", 10) == 7
 
 
 def test_claim_isolated_per_site(db):
@@ -250,12 +269,12 @@ def test_pending_sites(db):
 # ---------- 可下载时间窗口 ----------
 
 def _window(site_window, now, website="pixiv"):
-    ConfigManager.config_dict["download_sites"] = {website: {"download_window": site_window}}
+    ConfigManager.config_dict["download"] = {"site": {website: {"download_window": site_window}}}
     return Downloader._in_download_window(website, now=now)
 
 
 def test_window_unset_always_allows():
-    ConfigManager.config_dict["download_sites"] = {"pixiv": {}}
+    ConfigManager.config_dict["download"] = {"site": {"pixiv": {}}}
     assert Downloader._in_download_window("pixiv", now=datetime(2026, 11, 1, 12, 0)) is True
 
 
@@ -306,33 +325,35 @@ def test_window_fail_open_on_bad_config():
 # ---------- 调度周期配置化 ----------
 
 def test_tick_reads_config_and_falls_back():
-    ConfigManager.config_dict["download_setting"] = {"site_scan_interval": 9}
+    ConfigManager.config_dict["download"] = {"site_scan_interval": 9}
     assert Downloader._tick("site_scan_interval", 5) == 9          # 配置覆盖
     assert Downloader._tick("window_check_interval", 60) == 60     # 键缺失回落默认
-    ConfigManager.config_dict["download_setting"]["site_scan_interval"] = 0
+    ConfigManager.config_dict["download"]["site_scan_interval"] = 0
     assert Downloader._tick("site_scan_interval", 5) == 1          # 下限保护：最小 1 秒
 
 
 def test_window_waits_use_configured_tick(db, cache_env, monkeypatch):
     """窗口外等待按配置的检查周期轮询（用小周期缩短验证时间）"""
     import time as _time
-    ConfigManager.config_dict["download_setting"].update({
+    ConfigManager.config_dict["download"] = {
         "do_download": True,
         "window_check_interval": 1,
-        "use_cache": True,
-        "download_path": str(cache_env["final"]),
-        "cache_path": str(cache_env["cache"]),
-        "waiting_play": False,
-        "sleep_second": 0,
-    })
-    ConfigManager.config_dict["download_sites"] = {
-        "pixiv": {"do_download": True, "download_thread": 1,
-                  "download_interval": 2,
-                  "download_window": {"mode": "daily", "start": "03:00", "end": "04:00"}},
+        "site": {
+            "default": {"use_cache": True, "download_path": str(cache_env["final"]),
+                        "cache_path": str(cache_env["cache"]), "waiting_play": False,
+                        "sleep_second": 0},
+            "pixiv": {"do_download": True, "download_thread": 1,
+                      "download_interval": 2,
+                      "download_window": {"mode": "daily", "start": "03:00", "end": "04:00"}},
+        },
     }
     _add(workNumber="W", website="pixiv", state="inQueue")
     d = Downloader()
     pool = ThreadPool(max_workers=1, name="t")
+    # 窗口判定已有纯函数测试覆盖（test_daily_window_*），这里钉死为"永远在
+    # 窗口外"——否则用真实时间构造窗口，跑到窗口内的时段必然翻车
+    monkeypatch.setattr(Downloader, "_in_download_window",
+                        classmethod(lambda cls, website, now=None: False))
     try:
         # 窗口外跑 2.5 秒：应出现"等待窗口开启"且作品未被认领
         runner = Thread(target=d._site_loop, args=("pixiv", pool), daemon=True)
@@ -349,3 +370,54 @@ def test_window_waits_use_configured_tick(db, cache_env, monkeypatch):
         assert saw_wait and _state("W") == "inQueue"
     finally:
         d._stop_event.set()
+
+
+# ---------- ThreadPool 提交失败回滚 ----------
+
+def test_submit_rolls_back_on_executor_failure(monkeypatch):
+    """super().submit 抛异常（典型：acquire 阻塞期间发生 shutdown）时，
+    已占用的信号量与活跃计数必须回滚，否则 wait_for_completion 会永久等待"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    pool = ThreadPool(max_workers=2, name="rollback")
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("simulated shutdown race")
+
+    monkeypatch.setattr(ThreadPoolExecutor, "submit", _boom)
+    with pytest.raises(RuntimeError):
+        pool.submit(lambda: None)
+
+    stats = pool.get_stats()
+    assert stats['active_tasks'] == 0
+    assert stats['available_threads'] == 2  # 信号量已归还
+
+    monkeypatch.undo()
+    fut = pool.submit(lambda: 42)  # 回滚后池仍可用
+    assert fut.result(timeout=5) == 42
+    pool.shutdown(wait=True)
+    assert pool.get_stats()['active_tasks'] == 0
+
+
+def test_shutdown_cancel_futures_reclaims_active_count(monkeypatch):
+    """被 cancel_futures 取消的排队任务不会执行 wrap_fn，计数须由回调补回收。
+
+    信号量背压下正常提交流程不会产生排队任务，这里放宽信号量人为制造
+    "已计数但尚未执行"的排队任务（真实场景来自 shutdown 竞态窗口）。
+    """
+    from threading import Event, Semaphore
+
+    pool = ThreadPool(max_workers=1, name="cancel")
+    monkeypatch.setattr(pool, '_sema', Semaphore(10))
+    started, release = Event(), Event()
+    try:
+        pool.submit(lambda: (started.set(), release.wait(5)))
+        pool.submit(lambda: None)  # worker 被占住，此任务已计数但排队未执行
+        assert started.wait(5)
+        assert pool.get_stats()['active_tasks'] == 2
+        release.set()
+        pool.shutdown(wait=True, cancel_futures=True)  # 排队任务被取消
+        assert pool.get_stats()['active_tasks'] == 0
+    finally:
+        release.set()
+        pool.shutdown(wait=True, cancel_futures=True)

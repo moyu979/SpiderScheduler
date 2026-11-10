@@ -1,7 +1,14 @@
+"""发布位点管理端点：位点添加、停止/恢复追踪与更新配置更新。
+
+全部端点挂在 /api/update 前缀下，与 REPL 的 add-pos 共用同一批模型与
+配置写入路径，保证行为语义一致。
+"""
+
 from flask import Blueprint, request, jsonify
 from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
 from src.config.config import GetUnknownKey
+from src.service.updater import updater
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import PublishPos
 from datetime import datetime
@@ -31,10 +38,10 @@ class UpdateApi:
                     }), 400
                 
                 # 验证配置字典是否存在
-                if 'update_setting' not in ConfigManager.config_dict:
+                if 'update' not in ConfigManager.config_dict:
                     return jsonify({
                         'success': False,
-                        'error': '配置字典 update_setting 不存在'
+                        'error': '配置字典 update 不存在'
                     }), 400
                 
                 # 更新配置项
@@ -44,12 +51,12 @@ class UpdateApi:
                 for key, value in data.items():
                     try:
                         # 验证键是否存在
-                        if key not in ConfigManager.config_dict['update_setting']:
+                        if key not in ConfigManager.config_dict['update']:
                             errors.append(f"配置键 '{key}' 不存在")
                             continue
                         
                         # 更新配置
-                        ConfigManager.set('update_setting', key, value)
+                        ConfigManager.set('update', key, value)
                         updated_keys.append(key)
                         logger.info(f"更新更新配置: {key} = {value}")
                     except GetUnknownKey as e:
@@ -259,3 +266,46 @@ class UpdateApi:
                     'success': False,
                     'error': f'恢复追踪位点失败: {str(e)}'
                 }), 500
+
+        #立即更新单个位点（绕过轮次调度，后台执行）
+        @self.blueprint.route('/update_now', methods=['POST'])
+        def update_now():
+            """立即更新指定位点（后台执行，立即返回是否受理）"""
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({
+                        'success': False,
+                        'error': '请求体不能为空'
+                    }), 400
+
+                author_id = data.get('authorId') or data.get('author_id') or data.get('uid')
+                website = data.get('website') or 'pixiv'
+                if not author_id:
+                    return jsonify({
+                        'success': False,
+                        'error': '缺少作者ID (authorId/author_id/uid)'
+                    }), 400
+                author_id = str(author_id)
+                website = str(website).strip() or 'pixiv'
+
+                result = updater.update_position_now(website, author_id)
+                if not result.get("started"):
+                    code = {"not_found": 404, "stopped": 400}.get(result.get("reason"), 200)
+                    return jsonify({'success': False, **result}), code
+                logger.info(f"立即更新已受理: {author_id}@{website}")
+                return jsonify({'success': True, 'started': True,
+                                'author_id': author_id, 'website': website}), 200
+
+            except Exception as e:
+                logger.error(f"立即更新失败: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': f'立即更新失败: {str(e)}'
+                }), 500
+
+        #“立即更新”状态查询（供前端轮询）
+        @self.blueprint.route('/update_now/status')
+        def update_now_status():
+            """返回全部立即更新任务的状态快照"""
+            return jsonify({'success': True, 'statuses': updater.manual_status()})

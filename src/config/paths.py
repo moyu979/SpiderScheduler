@@ -6,7 +6,9 @@ BASEPATH 环境变量覆盖）派生。其余模块一律通过本模块取路�
 
 路径分组：
 - 配置与脚本：config_path / 各脚本来源（含多文件分发的站点目录）；
-- 运行数据：db_path / log_path / cookies_path / download 相关。
+- 运行数据：db_path / log_path / cookies_path / download_path / download_cache_path。
+  （下载产物与缓存的根路径优先取 download.yaml 的 site.default 段配置，
+  未配置时由这两个函数给出基于 BASEPATH 的兜底值。）
 """
 
 import glob
@@ -93,10 +95,14 @@ def cookies_path() -> str:
 
 
 def download_path() -> str:
-    """下载产物最终保存目录（模板中的 download_path 支持 ${BASE_PATH}）。"""
+    """下载产物最终保存目录的兜底值（BASEPATH/datas/download）。
+
+    优先级：download.yaml 的 site.download_path 配置（支持 ${BASE_PATH}）>
+    本函数；配置缺省时代码兜底，保证三层配置全缺也不崩。
+    """
     return os.path.join(base_path(), "datas", "download")
 
 
 def download_cache_path() -> str:
-    """下载缓存中转目录。"""
+    """下载缓存中转目录的兜底值（BASEPATH/datas/download_cache），优先级同上。"""
     return os.path.join(base_path(), "datas", "download_cache")

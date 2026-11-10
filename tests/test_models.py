@@ -1,3 +1,5 @@
+"""ORM 模型测试：表结构、联合主键与外键约束行为。
+"""
 import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import IntegrityError

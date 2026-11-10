@@ -1,0 +1,53 @@
+# 下载配置（全局层 + 站点层合并文件）。
+# 根键：不可按站点覆盖的全局开关与巡检周期；
+# `site` 结构：站点可覆盖的全部键（解析顺序：site.<website> > site.default >
+# 代码内置兜底，任一层缺省都不会导致调度失败）。default 是保留名，不能作为
+# 真实站点名使用。
+
+# ---- 全局层 ----
+
+# 是否执行下载操作（全局总开关；站点级可在 site.<website> 单独关闭）
+do_download: false
+
+# 站点巡检周期（秒）：守护线程发现有新待下载作品的站点并拉起其调度线程的频率，
+# 决定新作品从入队到开始下载的最大发现延迟
+site_scan_interval: 5
+# 可下载窗口外的等待检查周期（秒）：窗口外的轮询间隔，也决定窗口开启后
+# 最多延迟多久开始下载（轮末休眠亦按此分段以便及时响应配置变化）
+window_check_interval: 60
+
+# ---- 站点层 ----
+site:
+  # default：全部站点共用的默认值（站点段写了同名键则以站点段为准），
+  # 日常调优只需要改这里
+  default:
+    download_thread: 1          # 每站点下载线程数
+    once_download_number: -1    # 每轮下载数量限制，-1 表示无限制
+    download_interval: 3600     # 每轮间隔（秒），-1 表示持续下载
+    waiting_play: false         # 下载完成后按脚本返回的 duration 模拟播放（视频站用）
+    sleep_second: 15            # 不等播放时的任务间定长节奏（秒）
+    use_cache: true             # 产物先写缓存目录，完成后由框架拷贝到最终保存路径
+    download_path: "./${BASE_PATH}/datas/download"          # 最终保存路径根
+    cache_path: "./${BASE_PATH}/datas/download_cache"       # 缓存中转目录根
+    # download_window:          # 可下载时间窗口（缺省不限制；格式见下方说明）
+    #   mode: daily
+    #   start: "00:00"
+    #   end: "08:00"
+
+  # 站点覆盖示例（只写与 default 不同的键）
+  # pixiv:
+  #   download_thread: 2
+  #   sleep_second: 8
+  # danbooru:
+  #   do_download: false
+  # gelbooru:
+  #   download_window:
+  #     mode: monthly            # 每月 1、2 号和最后一天的全天突击
+  #     month_days: [1, 2, -1]
+
+# download_window 格式（配合 once_download_number: -1 与 download_interval: -1
+# 可实现窗口内全速突击）：
+#   mode: daily / weekly / monthly     （不写 = 不限制）
+#   start / end: "HH:MM"               （支持跨天，如 22:00-06:00）
+#   weekdays: [1, 5]                   （weekly 用，1=周一..7=周日）
+#   month_days: [1, 2, -1]             （monthly 用，负数=倒数第几天）

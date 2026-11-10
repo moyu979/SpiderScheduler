@@ -231,7 +231,8 @@ class CookieApi:
         @self.blueprint.route('/<website>/save', methods=['POST'])
         def save(website):
             """把该站点登录会话积累的 cookie 落盘"""
-            session = _SESSIONS.get(website)
+            with _SESSIONS_LOCK:  # 与 _session()/cancel() 对 _SESSIONS 的访问保持互斥
+                session = _SESSIONS.get(website)
             if session is None or len(session.cookies) == 0:
                 logger.warning(f"保存 {website} cookie 失败：登录会话中没有 cookie")
                 return _err('该站点还没有可保存的 cookie，请先在登录页完成登录')

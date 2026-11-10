@@ -72,8 +72,8 @@ def main(base_path: str = None):
     init()
     logger.info("程序已启动（BASEPATH=%s，API=%s:%s）",
                 config_manager.base_path,
-                ConfigManager.get('network', 'rest_api_host'),
-                ConfigManager.get('network', 'rest_api_port'))
+                ConfigManager.get('system', 'rest_api_host'),
+                ConfigManager.get('system', 'rest_api_port'))
     
     try:
         # 无限循环，直到收到中断信号（默认模式）

@@ -1,3 +1,5 @@
+"""查询 API 测试：组合筛选、分页排序白名单与统计端点。
+"""
 import pytest
 from flask import Flask
 from sqlalchemy import create_engine

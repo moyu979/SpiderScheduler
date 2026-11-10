@@ -1,3 +1,5 @@
+"""数据库迁移测试：版本盖章、旧库结构迁移与 0002 幂等重放。
+"""
 import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
@@ -89,4 +91,68 @@ def test_sqlite_pragmas_applied(tmp_path):
         assert busy == 30000
         assert mode == "wal"
     finally:
+        engine.dispose()
+
+
+def _create_v1_db(engine):
+    """手工构造 v1 结构（user 表 + upload 指向 user 的复合外键）并写入样例数据"""
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text('''
+            CREATE TABLE works (
+                "workNumber" VARCHAR NOT NULL, website VARCHAR NOT NULL,
+                "upTime" VARCHAR, title VARCHAR, kind VARCHAR, state VARCHAR,
+                "downloadDate" VARCHAR, "downloadPriority" INTEGER, "otherInfo" VARCHAR,
+                downloadInfo VARCHAR, PRIMARY KEY ("workNumber", website))'''))
+        conn.execute(text('''
+            CREATE TABLE user (
+                "userId" VARCHAR NOT NULL, website VARCHAR NOT NULL,
+                "addTime" VARCHAR, state VARCHAR, PRIMARY KEY ("userId", website))'''))
+        conn.execute(text('''
+            CREATE TABLE upload (
+                website VARCHAR NOT NULL, "userId" VARCHAR NOT NULL, "workNumber" VARCHAR NOT NULL,
+                PRIMARY KEY (website, "userId", "workNumber"),
+                CONSTRAINT fk_upload_user FOREIGN KEY("userId", website)
+                    REFERENCES user ("userId", website) DEFERRABLE INITIALLY DEFERRED,
+                CONSTRAINT fk_upload_works FOREIGN KEY("workNumber", website)
+                    REFERENCES works ("workNumber", website) DEFERRABLE INITIALLY DEFERRED)'''))
+        conn.execute(text("INSERT INTO user VALUES ('u1', 'pixiv', '2026-03-26T00:25:59', 'inQueue')"))
+        conn.execute(text("INSERT INTO upload VALUES ('pixiv', 'u1', 'w1')"))
+        conn.execute(text("CREATE TABLE schema_version (version INTEGER NOT NULL)"))
+        conn.execute(text("INSERT INTO schema_version VALUES (1)"))
+
+
+def _load_migration_0002():
+    import importlib.util
+    from pathlib import Path
+    path = Path(db_module.__file__).parent / "migrations" / "0002_rename_user_to_publish_pos.py"
+    spec = importlib.util.spec_from_file_location("mig_0002_idem", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_migration_0002_replay_is_idempotent(tmp_path):
+    """apply 提交后、版本号推进前崩溃 → 重启重放 0002 必须全部跳过且数据无损"""
+    engine = create_engine(f"sqlite:///{tmp_path / 'replay.db'}")
+    _create_v1_db(engine)
+    migration = _load_migration_0002()
+
+    migration.apply(engine)  # 第一次执行（等价正常迁移）
+    migration.apply(engine)  # 模拟崩溃后重放：不应抛错、不应重复改名
+
+    db_module.DatabaseManager.engine = engine
+    try:
+        # 随后 _run_migrations 按 version=1 补跑，仍应正常完成
+        Base.metadata.create_all(engine)
+        db_module.DatabaseManager._run_migrations(is_new=False)
+        with engine.begin() as conn:
+            tables = {r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+            assert "publish_pos" in tables and "user" not in tables
+            rows = conn.execute(text("SELECT authorId, website, state FROM publish_pos")).fetchall()
+            assert rows == [("u1", "pixiv", "inQueue")]  # 数据无损、无重复
+            version = conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar()
+            assert version == db_module.HEAD_SCHEMA_VERSION
+    finally:
+        db_module.DatabaseManager.engine = None
         engine.dispose()

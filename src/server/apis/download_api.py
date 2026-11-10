@@ -1,10 +1,15 @@
+"""下载队列管理端点：作品入队、停止、重排与下载配置更新。
+
+全部端点挂在 /api/download 前缀下，与 REPL 的作品操作共用同一批模型与
+配置写入路径，保证行为语义一致。
+"""
+
 import json
 from flask import Blueprint, request, jsonify
 from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
 from src.utils.database.database import DatabaseManager
-from src.utils.database.models import Works, Upload
-from datetime import datetime
+from src.utils.database.models import Works
 from src.config.config import GetUnknownKey
 
 class DownloadApi:
@@ -31,10 +36,10 @@ class DownloadApi:
                     }), 400
                 
                 # 验证配置字典是否存在
-                if 'download_setting' not in ConfigManager.config_dict:
+                if 'download' not in ConfigManager.config_dict:
                     return jsonify({
                         'success': False,
-                        'error': '配置字典 download_setting 不存在'
+                        'error': '配置字典 download 不存在'
                     }), 400
                 
                 # 更新配置项
@@ -44,12 +49,12 @@ class DownloadApi:
                 for key, value in data.items():
                     try:
                         # 验证键是否存在
-                        if key not in ConfigManager.config_dict['download_setting']:
+                        if key not in ConfigManager.config_dict['download']:
                             errors.append(f"配置键 '{key}' 不存在")
                             continue
                         
                         # 更新配置
-                        ConfigManager.set('download_setting', key, value)
+                        ConfigManager.set('download', key, value)
                         updated_keys.append(key)
                         logger.info(f"更新下载配置: {key} = {value}")
                     except GetUnknownKey as e:

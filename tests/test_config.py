@@ -1,3 +1,7 @@
+"""ConfigManager 单元测试：键读取、错误信息、环境变量覆盖、热重载与持久化。
+"""
+import time
+
 import pytest
 
 from src.config.config import ConfigManager, GetUnknownKey
@@ -44,26 +48,26 @@ def test_base_path_placeholder_replaced():
 def test_env_override_memory_only(monkeypatch, tmp_path):
     # base_path 指到空目录，验证环境变量覆盖不会写任何文件
     monkeypatch.setattr(ConfigManager, "base_path", str(tmp_path))
-    ConfigManager.config_dict["update_setting"] = {"do_update": False}
-    monkeypatch.setenv("UPDATE_SETTING_DO_UPDATE", "true")
+    ConfigManager.config_dict["update"] = {"do_update": False}
+    monkeypatch.setenv("UPDATE_DO_UPDATE", "true")
 
     ConfigManager._apply_env_overrides()
 
-    assert ConfigManager.get("update_setting", "do_update") is True
+    assert ConfigManager.get("update", "do_update") is True
     assert list(tmp_path.iterdir()) == []  # 配置文件没有被持久化改写
 
 
 def test_reload_reapplies_env_override(monkeypatch, tmp_path):
     confs = tmp_path / "confs"
     confs.mkdir()
-    (confs / "update_setting.yaml").write_text("do_update: false\n", encoding="utf-8")
+    (confs / "update.yaml").write_text("do_update: false\n", encoding="utf-8")
     monkeypatch.setattr(ConfigManager, "base_path", str(tmp_path))
-    monkeypatch.setenv("UPDATE_SETTING_DO_UPDATE", "true")
+    monkeypatch.setenv("UPDATE_DO_UPDATE", "true")
 
     ConfigManager.load_all_configs()
 
     # 热重载后环境变量覆盖依然生效
-    assert ConfigManager.get("update_setting", "do_update") is True
+    assert ConfigManager.get("update", "do_update") is True
 
 
 def test_load_builds_copy_then_swaps(monkeypatch, tmp_path):
@@ -107,3 +111,28 @@ def test_replace_section_validates_swaps_and_saves(monkeypatch, tmp_path):
         ConfigManager.replace_section("ghost", {"k": 1})
     with pytest.raises(ValueError):
         ConfigManager.replace_section("demo", [1, 2, 3])
+
+
+def test_daemon_loop_survives_reload_failure(monkeypatch):
+    """热重载抛异常（如配置目录短暂缺失）时守护线程必须存活：
+    记录日志、旧配置继续生效、下个周期自动重试"""
+    ConfigManager.stop_daemon()  # 清掉可能残留的守护线程
+
+    calls = {'n': 0}
+
+    def flaky_load():
+        calls['n'] += 1
+        if calls['n'] <= 2:
+            raise FileNotFoundError("配置目录暂时不可用")
+
+    monkeypatch.setattr(ConfigManager, 'load_all_configs', flaky_load)
+    ConfigManager.config_dict['system'] = {'conf_reload_interval': 0.1}
+    try:
+        ConfigManager.start_daemon()
+        time.sleep(1.0)
+
+        assert calls['n'] >= 3, "守护线程应持续重试，而不是死在第一次异常"
+        assert ConfigManager._daemon_thread is not None
+        assert ConfigManager._daemon_thread.is_alive()
+    finally:
+        ConfigManager.stop_daemon()

@@ -1,3 +1,7 @@
+"""pytest 全局配置。
+
+把仓库根目录加入 sys.path，保证从任意目录运行 pytest 都能导入 src 包。
+"""
 import os
 import sys
 

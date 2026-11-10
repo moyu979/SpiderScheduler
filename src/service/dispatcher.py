@@ -158,6 +158,16 @@ class ScriptDispatcher:
     """
 
     def __init__(self, sources, fallback_class_name: str):
+        """加载脚本来源并构建初始路由表（构造即完成首次 load）。
+
+        Args:
+            sources: "返回脚本文件路径列表"的函数（或直接给 str/list），
+                按优先级排序；每次 load 都会重新求值。
+            fallback_class_name: 文件内无 website 声明时作为兜底的类名。
+
+        Raises:
+            AttributeError: 所有来源既无 website 声明也找不到兜底类。
+        """
         self.sources = sources  # callable -> list[str] | str | list[str]
         self.fallback_class_name = fallback_class_name
         self._routes = {}        # website -> class
@@ -166,6 +176,14 @@ class ScriptDispatcher:
         self.load()
 
     def _resolve_paths(self):
+        """求值脚本文件来源并过滤不存在的路径。
+
+        sources 为可调用对象时每次调用重新求值（新上传文件即时被发现），
+        也兼容直接给 str 或 list。
+
+        Returns:
+            list[str]: 实际存在的脚本文件路径，保持来源给出的优先级顺序。
+        """
         sources = self.sources() if callable(self.sources) else self.sources
         if isinstance(sources, str):
             sources = [sources]

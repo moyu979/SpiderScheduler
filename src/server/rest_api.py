@@ -1,3 +1,10 @@
+"""REST API 服务：组装 Flask 应用并在后台线程运行。
+
+职责：注册全部 API 蓝图、托管前端单页（/）、注册全局错误处理（含登录代理
+页根相对请求的 404 救援）。使用 werkzeug make_server 以支持优雅关闭；
+init(run_in_background=True) 在守护线程启动，stop() 供退出流程调用。
+"""
+
 import threading
 from pathlib import Path
 from typing import Optional
@@ -6,13 +13,12 @@ from werkzeug.serving import make_server
 from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
 from src.server.apis.download_api import DownloadApi
-from src.server.apis.global_api import GlobalApi
 from src.server.apis.update_api import UpdateApi
-from src.server.apis.network_api import NetworkApi
 from src.server.apis.query_api import QueryApi
 from src.server.apis.cookie_api import CookieApi
 from src.server.apis.script_api import ScriptApi
 from src.server.apis.config_api import ConfigApi
+from src.server.apis.website_api import WebsitesApi
 
 class RestApiService:
     """REST API 服务。
@@ -31,9 +37,9 @@ class RestApiService:
         self.app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
         
         # 获取配置
-        self.host = ConfigManager.get('network', 'rest_api_host')
-        self.port = ConfigManager.get('network', 'rest_api_port')
-        self.debug = ConfigManager.get('global_conf', 'debug') or False
+        self.host = ConfigManager.get('system', 'rest_api_host')
+        self.port = ConfigManager.get('system', 'rest_api_port')
+        self.debug = ConfigManager.get('system', 'debug') or False
         
         # 服务器实例（用于优雅关闭）
         self._server = None
@@ -61,23 +67,21 @@ class RestApiService:
         """注册所有 API 模块"""
         # 创建 API 实例
         download_api = DownloadApi()
-        global_api = GlobalApi()
         update_api = UpdateApi()
-        network_api = NetworkApi()
         query_api = QueryApi()
         cookie_api = CookieApi()
         script_api = ScriptApi()
         config_api = ConfigApi()
+        website_api = WebsitesApi()
 
         # 注册蓝图
         self.app.register_blueprint(download_api.blueprint)
-        self.app.register_blueprint(global_api.blueprint)
         self.app.register_blueprint(update_api.blueprint)
-        self.app.register_blueprint(network_api.blueprint)
         self.app.register_blueprint(query_api.blueprint)
         self.app.register_blueprint(cookie_api.blueprint)
         self.app.register_blueprint(script_api.blueprint)
         self.app.register_blueprint(config_api.blueprint)
+        self.app.register_blueprint(website_api.blueprint)
 
         logger.info("所有 API 模块已注册")
     
@@ -93,7 +97,11 @@ class RestApiService:
             if marker in referer:
                 website = referer.split(marker, 1)[1].split('/', 1)[0]
                 from flask import redirect
-                return redirect(f"{marker}{website}/proxy{request.path}", code=302)
+                target = f"{marker}{website}/proxy{request.path}"
+                if request.query_string:
+                    # 原请求的查询串必须带回，否则救援后的请求丢参数
+                    target += '?' + request.query_string.decode('utf-8', errors='replace')
+                return redirect(target, code=302)
             return jsonify({
                 'success': False,
                 'error': 'API 端点不存在',

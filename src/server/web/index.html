@@ -18,6 +18,8 @@
   header .spacer { flex: 1; }
   button.ghost { border: 1px solid var(--line); background: var(--card); padding: 6px 14px; border-radius: 8px; cursor: pointer; }
   button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+  button.ghost.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.ghost.on:hover { color: #fff; opacity: .92; }
   main { padding: 14px 20px 40px; max-width: 1400px; margin: 0 auto; }
 
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
@@ -100,6 +102,7 @@
   <button class="tab" id="tab-cookie">Cookie</button>
   <button class="tab" id="tab-system">系统</button>
   <span class="spacer"></span>
+  <button class="ghost on" id="btn-auto-refresh">自动刷新:开</button>
   <button class="ghost" id="btn-refresh">刷新</button>
 </header>
 <main>
@@ -152,9 +155,20 @@
   </div>
 
   <div class="card filters hidden" id="filters-cookie">
-    <span style="color:var(--muted)">各站点的登录 cookie。未配置时点"去登录"，在弹出的目标站登录页完成登录后点"完成并保存"，
-      cookie 将保存到工作目录供脚本按 website 取用。</span>
+    <span style="color:var(--muted)">各站点的登录 cookie 与入口地址。未配置时点"去登录"，在弹出的目标站登录页完成登录后点"完成并保存"，
+      cookie 将保存到工作目录供脚本按 website 取用；站点入口支持在线增改（写回 websites.yaml）。</span>
+    <button class="ghost" id="btn-add-site">添加站点</button>
     <button class="ghost" id="c-reset">刷新</button>
+  </div>
+
+  <div class="card hidden" id="add-site-card">
+    <span class="grp">
+      <label>站点名</label><input type="text" id="add-site-name" placeholder="如 bilibili">
+      <label>入口地址</label><input type="text" id="add-site-url" placeholder="https://www.example.com" style="width:260px">
+      <button class="ghost" id="add-site-confirm">保存</button>
+      <button class="ghost" id="add-site-cancel">取消</button>
+      <span id="add-site-msg"></span>
+    </span>
   </div>
 
   <div class="card hidden" id="panel-system">
@@ -175,7 +189,8 @@
         <input type="text" id="up-name" placeholder="文件名（如 pixiv）" style="width:150px">
         <input type="file" id="up-file" accept=".py">
         <button class="ghost" id="btn-up-upload">上传</button>
-        <span class="hint">保存后自动重新扫描；同名文件或 website 与其他脚本重复时会询问是否覆盖</span>
+        <span class="hint">“文件名”是服务器上的保存名（不含 .py），留空则自动取上传文件名；
+          保存后自动重新扫描，同名或 website 重复时会询问是否覆盖</span>
       </div>
       <span id="up-msg" class="hint"></span>
       <pre id="script-view" class="hidden"></pre>
@@ -216,6 +231,11 @@ const S = {
   works: { website: '', states: new Set(), author: '', dateField: 'upTime', from: '', to: '', kw: '', sort: 'downloadPriority', order: 'desc', page: 0 },
   positions: { website: '', states: new Set(), kw: '', from: '', to: '', page: 0 },
   stats: null,
+  autoRefresh: true,   // 页头“自动刷新”开关：5 秒一次拉当前 Tab 数据（系统 Tab 除外）
+  updateNow: {},      // “立即更新”状态 {website|authorId: {state, added, error}}，轮询刷新
+  updateNowTimer: null,
+  siteRows: [],      // Cookie 页当前行（站点/地址/cookie 状态），供编辑入口地址时回填
+  siteUsage: {},     // 站点占用统计（作品/位点/脚本路由），删除站点时提示用
   size: 50,
 };
 
@@ -338,6 +358,7 @@ async function load() {
       const data = await api('/api/query/works?' + worksParams());
       renderWorks(data);
     } else {
+      await loadUpdateNowStatus();
       const data = await api('/api/query/positions?' + positionsParams());
       renderPositions(data);
     }
@@ -378,16 +399,26 @@ function renderWorks(data) {
 
 function renderPositions(data) {
   const rows = data.items.map(pos => {
+    const key = `${pos.website}|${pos.authorId}`;
+    const nowState = S.updateNow[key]?.state;
+    const nowBtn = pos.state !== 'stopped'
+      ? (nowState === 'running'
+        ? '<span class="badge st-downloading">更新中…</span>'
+        : `<button class="ghost" data-uact="now" data-author="${esc(pos.authorId)}" data-site="${esc(pos.website)}">立即更新</button>`)
+      : '';
     const acts = pos.state !== 'stopped'
       ? `<button class="ghost" data-posact="stop" data-author="${esc(pos.authorId)}" data-site="${esc(pos.website)}">停止追踪</button>`
       : `<button class="ghost" data-posact="resume" data-author="${esc(pos.authorId)}" data-site="${esc(pos.website)}">恢复追踪</button>`;
+    const nowInfo = nowState === 'done'
+      ? `<span class="hint" title="完成于 ${esc(S.updateNow[key].finishedAt || '')}">+${S.updateNow[key].added}</span>`
+      : (nowState === 'failed' ? '<span class="hint" style="color:#b91c1c" title="立即更新失败">失败</span>' : '');
     return `<tr>
       <td><code>${esc(pos.authorId)}</code></td>
       <td>${esc(pos.website)}</td>
       <td><span class="badge ${stClass(pos.state)}">${esc(stLabel(stKey(pos.state)))}</span></td>
-      <td>${pos.workCount}</td>
+      <td>${pos.workCount}${nowInfo ? ` ${nowInfo}` : ''}</td>
       <td>${esc(pos.addTime ?? '—')}</td>
-      <td class="actions">${acts}</td>
+      <td class="actions">${acts}${nowBtn ? ` ${nowBtn}` : ''}</td>
     </tr>`;
   }).join('');
   $('table').innerHTML = `<thead><tr>
@@ -404,12 +435,43 @@ function renderPager(data) {
   $('next').disabled = page >= pages - 1;
 }
 
-/* ---------- Cookie Tab ---------- */
+/* ---------- 立即更新：状态轮询 ---------- */
+async function loadUpdateNowStatus() {
+  try {
+    const data = await api('/api/update/update_now/status');
+    S.updateNow = data.statuses || {};
+  } catch (e) { /* 状态获取失败不阻塞列表 */ }
+}
+
+function pollUpdateNow() {
+  if (S.updateNowTimer) return;
+  S.updateNowTimer = setInterval(async () => {
+    await loadUpdateNowStatus();
+    const anyRunning = Object.values(S.updateNow).some(st => st.state === 'running');
+    if (S.tab === 'positions') { loadStats(); load(); }   // 统计条随完成一起刷新
+    if (!anyRunning) { clearInterval(S.updateNowTimer); S.updateNowTimer = null; }
+  }, 2000);
+}
+
+/* ---------- 自动刷新（后台更新/下载完成后无需手动刷新） ---------- */
+function autoRefreshTick() {
+  if (!S.autoRefresh || document.hidden) return;   // 页面不可见时跳过，省资源
+  if (S.tab === 'system') return;                  // 系统 Tab 有 YAML 编辑器，不自动刷
+  if (S.tab === 'cookie') { loadCookies(); return; }
+  loadStats().then(load);                          // 保持当前页码，只拉新数据
+}
+
+/* ---------- Cookie Tab（含站点入口管理） ---------- */
 async function loadCookies() {
   showError('');
   try {
-    const data = await api('/api/cookie/status');
-    renderCookies(data.rows || []);
+    const [data, web] = await Promise.all([
+      api('/api/cookie/status'),
+      api('/api/system/websites').catch(() => ({ usage: {} })),
+    ]);
+    S.siteRows = data.rows || [];
+    S.siteUsage = web.usage || {};
+    renderCookies(S.siteRows);
   } catch (e) { showError(e.message); }
 }
 
@@ -424,11 +486,13 @@ function renderCookies(rows) {
       <td class="actions">
         <button class="ghost" data-cact="login" data-site="${esc(r.website)}">去登录</button>
         ${r.hasCookie ? `<button class="ghost" data-cact="delete" data-site="${esc(r.website)}">删除</button>` : ''}
+        <button class="ghost" data-wact="edit" data-site="${esc(r.website)}">编辑地址</button>
+        <button class="ghost" data-wact="delete" data-site="${esc(r.website)}">删除站点</button>
       </td>
     </tr>`).join('');
   $('table').innerHTML = `<thead><tr>
       <th>站点</th><th>入口地址</th><th>Cookie 状态</th><th>更新时间</th><th>操作</th>
-    </tr></thead><tbody>${trs || `<tr><td colspan="5" class="empty">websites.yaml 里还没有配置站点</td></tr>`}</tbody>`;
+    </tr></thead><tbody>${trs || `<tr><td colspan="5" class="empty">还没有配置站点，点上方"添加站点"创建</td></tr>`}</tbody>`;
   $('pageinfo').textContent = `共 ${rows.length} 个站点`;
   $('prev').disabled = $('next').disabled = true;
 }
@@ -461,8 +525,9 @@ function switchTab(tab) {
   $('filters-works').classList.toggle('hidden', tab !== 'works');
   $('filters-users').classList.toggle('hidden', tab !== 'positions');
   $('filters-cookie').classList.toggle('hidden', tab !== 'cookie');
-  // 添加表单只通过「添加位点」按钮打开（打开时才拉站点列表），切 Tab 一律收起
+  // 添加表单只通过「添加位点」/「添加站点」按钮打开，切 Tab 一律收起
   $('add-pos-card').classList.add('hidden');
+  $('add-site-card').classList.add('hidden');
   $('stats').classList.toggle('hidden', tab === 'cookie' || tab === 'system');
   // 系统 Tab 用自己的面板，不用统计条/筛选栏/表格
   const useTable = tab !== 'system';
@@ -475,6 +540,12 @@ function switchTab(tab) {
 }
 
 $('btn-refresh').onclick = fullReload;
+$('btn-auto-refresh').onclick = (e) => {
+  S.autoRefresh = !S.autoRefresh;
+  e.target.textContent = `自动刷新:${S.autoRefresh ? '开' : '关'}`;
+  e.target.classList.toggle('on', S.autoRefresh);
+};
+setInterval(autoRefreshTick, 5000);
 $('c-reset').onclick = loadCookies;
 $('prev').onclick = () => goPage(-1);
 $('next').onclick = () => goPage(1);
@@ -482,6 +553,18 @@ $('pagesize').onchange = (e) => { S.size = +e.target.value; reload(); };
 
 // 表格行内操作：位点停止 / 作品停止与重排 / Cookie
 $('table').addEventListener('click', async (e) => {
+  const ubtn = e.target.closest('button[data-uact="now"]');
+  if (ubtn) {
+    ubtn.disabled = true;
+    try {
+      const data = await api.post('/api/update/update_now',
+        { authorId: ubtn.dataset.author, website: ubtn.dataset.site });
+      S.updateNow[`${ubtn.dataset.site}|${ubtn.dataset.author}`] = { state: 'running' };
+      load();
+      pollUpdateNow();
+    } catch (err) { showError(err.message); ubtn.disabled = false; }
+    return;
+  }
   const pbtn = e.target.closest('button[data-posact]');
   if (pbtn) {
     pbtn.disabled = true;
@@ -507,6 +590,36 @@ $('table').addEventListener('click', async (e) => {
       } catch (err) { showError(err.message); cbtn.disabled = false; }
     }
     return;
+  }
+  const wbtn = e.target.closest('button[data-wact]');
+  if (wbtn) {
+    const site = wbtn.dataset.site;
+    if (wbtn.dataset.wact === 'edit') {
+      const current = (S.siteRows.find(r => r.website === site) || {}).domain || 'https://';
+      const url = window.prompt(`修改站点「${site}」的入口地址`, current);
+      if (url === null) return;
+      wbtn.disabled = true;
+      try {
+        await api.put(`/api/system/websites/${encodeURIComponent(site)}`, { url: url.trim() });
+        loadCookies();
+      } catch (err) { showError(err.message); wbtn.disabled = false; }
+      return;
+    }
+    if (wbtn.dataset.wact === 'delete') {
+      const usage = S.siteUsage[site];
+      const used = usage && (usage.works || usage.positions || usage.routes.length);
+      const detail = used
+        ? `该站点仍被引用：${usage.works} 个作品、${usage.positions} 个位点` +
+          (usage.routes.length ? `，且被${usage.routes.join('、')}脚本路由` : '') + '。\n'
+        : '';
+      if (!window.confirm(`${detail}确定删除站点「${site}」吗？删除后该站登录代理与脚本路由立即失效。`)) return;
+      wbtn.disabled = true;
+      try {
+        await api.del(`/api/system/websites/${encodeURIComponent(site)}${used ? '?force=true' : ''}`);
+        loadCookies();
+      } catch (err) { showError(err.message); wbtn.disabled = false; }
+      return;
+    }
   }
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
@@ -600,6 +713,40 @@ $('u-reset').onclick = () => {
   renderFilterOptions(); renderStats(); reload();
 };
 
+/* 添加/编辑站点入口（写回 websites.yaml） */
+const setAddSiteMsg = (text, ok) => {
+  const el = $('add-site-msg');
+  el.textContent = text;
+  el.className = ok === undefined ? '' : (ok ? 'ok' : 'bad');
+};
+
+$('btn-add-site').onclick = () => {
+  const card = $('add-site-card');
+  if (!card.classList.contains('hidden')) { card.classList.add('hidden'); return; }
+  $('add-site-name').value = '';
+  $('add-site-url').value = 'https://';
+  setAddSiteMsg('');
+  card.classList.remove('hidden');
+  $('add-site-name').focus();
+};
+
+$('add-site-cancel').onclick = () => $('add-site-card').classList.add('hidden');
+
+$('add-site-confirm').onclick = async (e) => {
+  const name = $('add-site-name').value.trim();
+  const url = $('add-site-url').value.trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) { setAddSiteMsg('站点名只能含字母/数字/下划线/连字符', false); return; }
+  if (!/^https?:\/\//i.test(url)) { setAddSiteMsg('入口地址必须是 http(s):// 开头的完整 URL', false); return; }
+  e.target.disabled = true;
+  try {
+    const data = await api.put(`/api/system/websites/${encodeURIComponent(name)}`, { url });
+    setAddSiteMsg(`${data.created ? '已添加' : '已更新'} ${name} → ${url}`, true);
+    setTimeout(() => $('add-site-card').classList.add('hidden'), 600);
+    loadCookies();
+  } catch (err) { setAddSiteMsg(err.message, false); }
+  e.target.disabled = false;
+};
+
 // 统计条点击：站点名 → 设站点筛选；state chip → toggle 状态筛选
 $('stats').addEventListener('click', (e) => {
   const chip = e.target.closest('.chip'); const name = e.target.closest('.site-name');
@@ -616,18 +763,6 @@ $('stats').addEventListener('click', (e) => {
     (S.tab === 'works' ? $('w-website') : $('u-website')).value = cur.website;
     reload();
   }
-});
-
-// 行内操作
-$('table').addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const body = { workNumber: btn.dataset.w, website: btn.dataset.site };
-  btn.disabled = true;
-  try {
-    await action(btn.dataset.act === 'stop' ? '/api/download/stop_work' : '/api/download/requeue_work', body);
-    fullReload();
-  } catch (err) { showError(err.message); btn.disabled = false; }
 });
 
 /* ---------- 系统 Tab ---------- */
@@ -719,7 +854,10 @@ async function uploadScript(force) {
   const kind = $('up-kind').value;
   const name = $('up-name').value.trim().replace(/\.py$/i, '');
   const file = $('up-file').files[0];
-  if (!/^[A-Za-z0-9_-]+$/.test(name)) { setUpMsg('文件名只能含字母/数字/下划线/连字符', false); return; }
+  if (name && !/^[A-Za-z0-9_-]+$/.test(name)) {
+    setUpMsg('保存名（文件名输入框，不含 .py）只能含字母/数字/下划线/连字符；留空则自动取上传文件名', false);
+    return;
+  }
   if (!file) { setUpMsg('请先选择要上传的 .py 文件', false); return; }
   const fd = new FormData();
   fd.append('kind', kind); fd.append('name', name); fd.append('file', file);
@@ -750,6 +888,15 @@ async function uploadScript(force) {
 }
 
 $('btn-up-upload').onclick = () => uploadScript(false);
+
+// 选择文件后自动回填保存名（留空时才回填，手动填过不覆盖）
+$('up-file').onchange = (e) => {
+  const f = e.target.files[0];
+  if (!f || $('up-name').value.trim()) return;
+  const derived = f.name.replace(/\.py$/i, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+  if (/^[A-Za-z0-9_-]+$/.test(derived)) $('up-name').value = derived;
+};
 
 document.getElementById('script-files').addEventListener('click', async (e) => {
   const viewBtn = e.target.closest('button[data-sview]');

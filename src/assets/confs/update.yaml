@@ -1,0 +1,30 @@
+# 更新配置（全局层 + 站点层合并文件）。
+# 根键：不可按站点覆盖的全局总开关；
+# `site` 结构：站点可覆盖的全部键（解析顺序：site.<website> > site.default >
+# 代码内置兜底）。default 是保留名，不能作为真实站点名使用。
+#
+# 查更新本身就是对目标站页面的爬取，因此每个站点的节奏独立可控：
+# 线程数 / 轮间隔 / 位点间错峰全部按站点隔离。
+
+# ---- 全局层 ----
+
+# 是否执行更新数据库操作（全局总开关；站点级可在 site.<website> 单独关闭）
+do_update: false
+
+# ---- 站点层 ----
+site:
+  # default：全部站点共用的默认值（站点段写了同名键则以站点段为准）
+  default:
+    update_thread: 1          # 每站点更新线程数
+    update_interval: 21600    # 每轮间隔（秒，±10% 抖动），-1 表示持续更新
+    commit_interval: 8        # 相邻位点更新任务之间的提交间隔（秒，错峰）
+    page_interval: 5          # 同一位点内相邻两页的抓取间隔（秒），由框架灌给
+                              # updater 脚本使用（翻页由脚本控制）
+
+  # 站点覆盖示例（只写与 default 不同的键）
+  # pixiv:
+  #   update_thread: 2
+  #   update_interval: 3600
+  #   page_interval: 10        # 某站点想更保守的翻页节奏，单独放宽到 10 秒
+  # danbooru:
+  #   do_update: false

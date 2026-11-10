@@ -1,3 +1,11 @@
+"""数据库管理器：引擎/会话工厂初始化、SQLite 运行参数与顺序迁移。
+
+版本约定：HEAD_SCHEMA_VERSION 是当前模型对应的 schema 版本；全新数据库由
+create_all 直接建出最新结构并记为该版本，旧库按 schema_version 表补跑
+migrations/ 下的迁移。会话统一经 get_db_session 上下文获取（退出提交、
+异常回滚、最后关闭）。
+"""
+
 import importlib.util
 import os
 from contextlib import contextmanager
@@ -22,6 +30,12 @@ HEAD_SCHEMA_VERSION = 2
 
 # SQLite 连接级参数：WAL 降低读写互斥、busy_timeout 缓解并发写锁冲突、开启外键约束
 def _set_sqlite_pragma(dbapi_connection, _connection_record):
+    """SQLite 连接钩子：新连接建立时设置 WAL / busy_timeout / 外键约束。
+
+    Args:
+        dbapi_connection: 原生 DBAPI 连接。
+        _connection_record: SQLAlchemy 连接池记录（未使用）。
+    """
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=30000")
@@ -30,13 +44,20 @@ def _set_sqlite_pragma(dbapi_connection, _connection_record):
 
 
 class DatabaseManager:
-    """数据库管理器"""
+    """数据库管理器：引擎、会话工厂与 schema 版本迁移的统一入口。
+
+    Attributes:
+        SessionLocal: 会话工厂（sessionmaker），init_database 后可用。
+        engine: SQLAlchemy 引擎，init_database 后可用。
+        db_path: 数据库路径（本地 SQLite 文件；远程连接串场景仅作记录）。
+    """
+
     SessionLocal = None
     engine = None
 
     @classmethod
     def init_database(cls):
-        """初始化数据库"""
+        """初始化数据库：建引擎、应用 PRAGMA、create_all 并补跑迁移。"""
         # paths.py 的 db_path 是函数，这里要调用获取实际路径
         cls.db_path = _global_db_path()
 
@@ -47,23 +68,25 @@ class DatabaseManager:
             os.makedirs(db_dir, exist_ok=True)
             logger.info(f"创建数据库目录: {db_dir}")
 
-        db_conf = config_manager.config_dict.get('database') or {}
-        raw_url = str(db_conf.get('url') or '').strip()
-        if raw_url and '${DB_PATH}' not in raw_url:
-            # 完整连接串（如 Postgres），原样使用
-            db_url = raw_url
+        sys_conf = config_manager.config_dict.get('system') or {}
+        raw_url = str(sys_conf.get('database_url') or '').strip()
+        if raw_url:
+            # 完整连接串（如 Postgres）；${DB_PATH} 占位符替换为实际 sqlite 文件绝对路径
+            db_url = raw_url.replace('${DB_PATH}', os.path.abspath(cls.db_path))
         else:
             # sqlite 文件路径统一由 paths.py 给出并取绝对路径：
             # yaml 里手拼 "./${DB_PATH}" 在 BASEPATH 为绝对路径时会产生
             # "sqlite:///./tmp/..." 这类按 cwd 误解的畸形 URL
             db_url = f"sqlite:///{os.path.abspath(cls.db_path)}"
-        is_new_database = not os.path.exists(cls.db_path)
+        is_remote_db = not db_url.startswith("sqlite")
+        # 新旧判定仅对本地文件型 SQLite 有意义（远程库无法从本地文件判断）
+        is_new_database = not is_remote_db and not os.path.exists(cls.db_path)
 
-        # 创建数据库引擎（echo / connect_args 均由 database.yaml 配置）
+        # 创建数据库引擎（echo / connect_args 均由 system.yaml 配置）
         cls.engine = create_engine(
             db_url,
-            echo=bool(db_conf.get('echo', False)),
-            connect_args=cls._build_connect_args(db_conf, db_url),
+            echo=bool(sys_conf.get('database_echo', False)),
+            connect_args=cls._build_connect_args(sys_conf, db_url),
         )
 
         # SQLite 运行参数：WAL 降低读写互斥、busy_timeout 缓解并发写锁冲突、开启外键约束
@@ -72,20 +95,28 @@ class DatabaseManager:
 
         # 使用ORM创建缺失的表（只建不改，结构变更走 migrations）
         Base.metadata.create_all(bind=cls.engine)
-        cls._run_migrations(is_new=is_new_database)
-
-        if is_new_database:
-            logger.info(f"成功创建数据库: {cls.db_path}")
+        if is_remote_db:
+            # 迁移脚本用 PRAGMA/sqlite_master，仅支持 SQLite；且本机残留的
+            # spider.db 会误导新旧判定，远程库一律跳过迁移
+            logger.warning("远程数据库（%s）：schema 迁移仅支持 SQLite，已跳过；"
+                           "请自行保证库结构与当前模型一致",
+                           cls.engine.dialect.name)
         else:
-            logger.info(f"数据库已存在: {cls.db_path}")
+            cls._run_migrations(is_new=is_new_database)
+
+            if is_new_database:
+                logger.info(f"成功创建数据库: {cls.db_path}")
+            else:
+                logger.info(f"数据库已存在: {cls.db_path}")
 
         # 创建会话工厂
         cls.SessionLocal = sessionmaker(bind=cls.engine)
 
     @classmethod
-    def _build_connect_args(cls, db_conf: dict, db_url: str) -> dict:
-        """connect_args 来自配置；SQLite 默认关闭同线程检查以支持多线程会话"""
-        connect_args = dict(db_conf.get('connect_args') or {})
+    def _build_connect_args(cls, sys_conf: dict, db_url: str) -> dict:
+        """connect_args 来自配置（system.yaml 的 database_connect_args）；
+        SQLite 默认关闭同线程检查以支持多线程会话"""
+        connect_args = dict(sys_conf.get('database_connect_args') or {})
         if db_url.startswith('sqlite'):
             connect_args.setdefault('check_same_thread', False)
         return connect_args

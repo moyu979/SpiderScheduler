@@ -1,3 +1,13 @@
+"""配置管理器：加载、热重载、环境变量覆盖与持久化。
+
+数据结构：config_dict 是"配置段名 → 键值字典"的两层字典，每个段对应
+confs/ 下的一个 yaml/json 文件（同名时 yaml > yml > json）。
+
+线程模型：所有读写经 _config_lock（RLock）串行；热重载采用
+"局部构建完整副本 → 锁内整体换入"，读方不会看到空窗，目录级失败时
+旧配置原样保留（守护线程兜底重试，见 _daemon_loop）。
+"""
+
 import json
 import os
 import threading
@@ -12,8 +22,12 @@ except Exception:  # pragma: no cover
 
 
 class GetUnknownKey(Exception):
-    """尝试获取不存在的配置键时抛出的异常"""
-    pass
+    """尝试获取不存在的配置键（段或键缺失）时抛出的异常。"""
+
+
+# site_setting 的 default 参数哨兵：未传时键全链缺失仍抛 GetUnknownKey
+_UNSET = object()
+
 
 class ConfigManager:
     """配置管理器：加载、热重载、环境变量覆盖与持久化。
@@ -23,6 +37,13 @@ class ConfigManager:
 
     线程模型：所有读写经 _config_lock（RLock）串行；热重载采用
     “局部构建完整副本 → 锁内整体换入”，读方不会看到空窗。
+
+    Attributes:
+        config_dict: 配置段名 → 键值字典 的两层字典。
+        _config_lock: 保护 config_dict 与写盘的全局可重入锁。
+        _daemon_thread: 热重载守护线程，start_daemon/stop_daemon 管理。
+        _stop_event: 守护线程的停止信号。
+        base_path: 工作目录（BASEPATH），在配置加载之前独立初始化。
     """
 
     # 全局配置字典
@@ -117,7 +138,7 @@ class ConfigManager:
 
             cls._stop_event.set()
             try:
-                timeout = ConfigManager.get("global_conf", "conf_retry_interval") * 2
+                timeout = ConfigManager.get("system", "conf_retry_interval") * 2
             except Exception:
                 timeout = 5
 
@@ -129,10 +150,10 @@ class ConfigManager:
     
     @classmethod
     def _daemon_loop(cls):
-        """守护线程循环"""
+        """守护线程循环：按 conf_reload_interval 周期热重载，异常只记录不退出。"""
         while not cls._stop_event.is_set():
             try:
-                interval = ConfigManager.get("global_conf", "conf_reload_interval")
+                interval = ConfigManager.get("system", "conf_reload_interval")
             except Exception:
                 interval = 10
 
@@ -141,7 +162,13 @@ class ConfigManager:
                 break
 
             logger.debug("守护线程执行一次配置重载")
-            cls.load_all_configs()
+            # 热重载的任何异常（目录短暂缺失、os.listdir 抛 OSError 等）只记录、
+            # 不退出：旧配置继续生效，下个周期自动重试。守护线程若在此死亡，
+            # 热重载会静默永久失效。首次加载走 init_config，仍会抛错终止启动。
+            try:
+                cls.load_all_configs()
+            except Exception as e:
+                logger.error(f"配置热重载失败（保留旧配置，下个周期重试）: {e}")
     
     @classmethod
     def get(cls, dict_name, key):
@@ -163,26 +190,40 @@ class ConfigManager:
             return value
         
     @classmethod
-    def site_setting(cls, site_section, base_section, website, key):
-        """站点级配置读取：site_section.<website>.<key> 覆盖 base_section.<key>。
+    def site_setting(cls, section, website, key, default=_UNSET):
+        """站点级配置读取：section.site.<website> > section.site.default > 代码兜底。
 
-        供按站点独立调度的服务（downloader / updater）解析配置；站点段未写出的
-        键回落全局基线段，覆盖值中的 ${BASE_PATH} 同样替换为工作目录。
+        合并式配置段（download / update）里，站点可覆盖的键统一放在 `site`
+        结构下：`site.default` 是全部站点共用的默认值（default 是保留名，不能
+        作为真实站点名），`site.<website>` 按站点覆盖。两层都未配置时回落参数
+        default；覆盖值中的 ${BASE_PATH} 同样替换为工作目录。
 
         Args:
-            site_section: 站点覆盖段名（download_sites / update_sites）。
-            base_section: 全局基线段名（download_setting / update_setting）。
+            section: 合并后的配置段名（download / update）。
             website: 站点名。
             key: 配置键。
+            default: 两层都未配置时的代码级兜底值；不传（哨兵）时抛 GetUnknownKey。
 
         Returns:
             解析后的配置值。
 
         Raises:
-            GetUnknownKey: 基线段/键也不存在时（由调用方决定兜底语义）。
+            GetUnknownKey: 两层均未配置且调用方未给 default 时。
         """
-        site_conf = (cls.config_dict.get(site_section) or {}).get(website) or {}
-        value = site_conf[key] if key in site_conf else cls.get(base_section, key)
+        site_root = (cls.config_dict.get(section) or {}).get("site") or {}
+        site_conf = site_root.get(website) or {}
+        if key in site_conf:
+            value = site_conf[key]
+        else:
+            default_conf = site_root.get("default") or {}
+            if key in default_conf:
+                value = default_conf[key]
+            elif default is not _UNSET:
+                return default
+            else:
+                available = ", ".join(sorted(site_root)) or "无"
+                raise GetUnknownKey(
+                    f"配置键不存在: {section}.site.{website}.{key}（site 下现有: {available}）")
         if isinstance(value, str) and '${BASE_PATH}' in value:
             value = value.replace('${BASE_PATH}', str(cls.base_path))
         return value

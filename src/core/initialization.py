@@ -30,9 +30,13 @@ def init_files() -> None:
     docker_dir.mkdir(parents=True, exist_ok=True)
     
     for source_path in assets_dir.rglob("*"):
+        # 跳过字节码缓存：模板目录若被 import 过（如 demos 继承模板基类），
+        # 会产生 __pycache__，不应把它当作模板装进工作目录
+        if "__pycache__" in source_path.parts:
+            continue
         relative_path = source_path.relative_to(assets_dir)
         target_path = docker_dir / relative_path
-        
+
         if source_path.is_dir():
             target_path.mkdir(parents=True, exist_ok=True)
         else:

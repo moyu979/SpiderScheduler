@@ -1,0 +1,38 @@
+# 系统运行配置（原 global_conf / logging / database / network 合并）。
+# 键名按子系统加前缀（database_* / rest_api_* / proxy_* 走原键名），
+# 修改后约 10 秒热重载；环境变量覆盖：<段名>_<键名> 大写，如
+# SYSTEM_REST_API_PORT=8300（仅内存生效，不回写文件）。
+
+# ---- 运行 ----
+# 调试模式
+debug: false
+# 配置热重载周期（秒）
+conf_reload_interval: 10
+# 认为载入配置失败时重试的间隔（秒，用作停止守护线程的超时上限）
+conf_retry_interval: 10
+
+# ---- 日志 ----
+# 控制台日志级别 / 文件日志级别；文件按月轮转 datas/log/<YYYY_MM>.log
+console_log_level: "INFO"
+file_log_level: "DEBUG"
+
+# ---- 数据库 ----
+# SQLite 文件库不需要配置（默认 BASEPATH/datas/spider.db 的绝对路径，
+# 连接串里可用 ${DB_PATH} 指代该路径）；
+# 如需其他数据库，填写完整连接串，例如：
+#   Postgres：postgresql+psycopg2://user:password@127.0.0.1:5432/spider
+# 注意：schema 迁移仅支持 SQLite，远程库需自行保证结构与当前模型一致
+database_url: ""
+# 透传给 SQLAlchemy create_engine 的参数（按需调整）
+database_echo: false
+database_connect_args:
+  check_same_thread: false
+
+# ---- 网络 ----
+# 后端 API 监听地址/端口（5000 在 macOS 上被 AirPlay Receiver 占用，避开它）
+rest_api_host: "0.0.0.0"
+rest_api_port: 8300
+# 代理：开启后自动注入 Selenium（--proxy-server）与 you-get（--http-proxy）
+use_proxy: false
+proxy_ip: "127.0.0.1"
+proxy_port: "7897"

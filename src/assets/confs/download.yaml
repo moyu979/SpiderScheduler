@@ -26,7 +26,7 @@ site:
     download_interval: 3600     # 每轮间隔（秒），-1 表示持续下载
     waiting_play: false         # 下载完成后按脚本返回的 duration 模拟播放（视频站用）
     sleep_second: 15            # 不等播放时的任务间定长节奏（秒）
-    use_cache: true             # 产物先写缓存目录，完成后由框架拷贝到最终保存路径
+    use_cache: true             # 产物先写缓存目录，完成后由框架按相对层级搬运到最终保存路径
     download_path: "./${BASE_PATH}/datas/download"          # 最终保存路径根
     cache_path: "./${BASE_PATH}/datas/download_cache"       # 缓存中转目录根
     # download_window:          # 可下载时间窗口（缺省不限制；格式见下方说明）

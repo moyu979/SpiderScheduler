@@ -88,6 +88,7 @@ class _FakeSite(ThreadingHTTPServer):
 
 @pytest.fixture()
 def fake_site():
+    """启动虚拟站点守护线程并在测试结束后关闭。"""
     site = _FakeSite()
     thread = threading.Thread(target=site.serve_forever, daemon=True)
     thread.start()
@@ -169,7 +170,10 @@ class E2EDownloadWork:
         resp = requests.get(os.environ["E2E_SITE_URL"] + f"/works/{self.work_number}/data",
                             headers=headers, timeout=10)
         resp.raise_for_status()
-        target = os.path.join(self.download_path, f"{self.work_number}.txt")
+        # 站点下载根下自建作品子目录（新契约：download_path 是 <根>/<website>/）
+        work_dir = os.path.join(self.download_path, self.work_number)
+        os.makedirs(work_dir, exist_ok=True)
+        target = os.path.join(work_dir, f"{self.work_number}.txt")
         with open(target, "w", encoding="utf-8") as f:
             f.write(resp.text)
         tools = getattr(self, "tools", None)

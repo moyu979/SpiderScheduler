@@ -1,9 +1,11 @@
-"""UpdateUser 站点脚本模板：部署骨架 + 脚本契约的唯一文档来源。
+"""UpdateUser 站点脚本模板：部署骨架与兜底更新脚本基类。
 
 本文件会被 init_files 补装到 BASEPATH/scripts/，承担双重角色：
 - 传统单文件兜底：全部脚本类都不声明 website 时，这里的 UpdateUser 对未
   路由站点兜底生效（dispatcher 的 fallback_class_name 即 "UpdateUser"）；
-- 契约文档：写真实站点脚本时按本文件的约定实现即可。可运行的行为示例见
+- 契约参考：契约的完整叙述见 docs/interfaces.zh-CN.md（英文版
+  docs/interfaces.en.md），本文件是部署模板与兜底类，docstring 与接口文档
+  保持一一对应。写真实站点脚本时按这里的约定实现即可。可运行的行为示例见
   demos/demo_site_updater.py（本地虚拟站点）与 scripts/bilibili/（真实站点）。
 
 框架约定：
@@ -42,6 +44,24 @@ tools.site_origin()、tools.register(name, fn)。
 
 
 class UpdateUser:
+    """站点更新（作者追踪）脚本基类：兜底骨架，翻页逻辑由子类实现。
+
+    模板模式下子类实现 get_one_page()，迭代协议走基类默认 __iter__/__next__；
+    生成器模式下子类直接覆写 __iter__ 返回生成器。完整契约见模块 docstring
+    （与 docs/interfaces.zh-CN.md 一一对应）。
+
+    Attributes:
+        website: 本类适用的站点名（str）或站点列表；None 表示未声明，
+            全部脚本类均未声明时由本类兜底。
+        cookie_manager: 框架注入的 cookie 入口，默认 CookieManager 类（文件
+            传入）；以库方式使用时可换成任何同接口对象（如
+            demos/in_memory_cookie_manager.py），脚本代码无需改动。
+        tools: 框架注入的 ScriptTools，与位点站点绑定。
+        page_interval: 框架注入的翻页间隔（秒）；直接实例化（未注入）时为
+            None，节奏由脚本自行决定。
+        page: 当前页码，从 1 起（模板模式的翻页游标）。
+        works: 当前页尚未消费的作品字典列表（模板模式由 get_one_page 填充）。
+    """
     # 声明本类适用的站点，如 "pixiv"，也可以给列表 ["pixiv", "danbooru"]。
     # 同一文件可放多个站点的类；全部类都不声明时，本文件作为传统单站点脚本兜底。
     website = None
@@ -75,14 +95,21 @@ class UpdateUser:
         pass
 
     def __iter__(self):
-        """重置为初始状态（框架对每个位点都重新迭代一次）。"""
+        """迭代协议入口：重置为初始状态（框架对每个位点都重新迭代一次）。"""
         # 重置为初始状态
         self.page = 1
         self.works = []
         return self
 
     def __next__(self):
-        """迭代协议：当前页消费完则翻下一页；翻页后仍无数据即结束。"""
+        """迭代协议：当前页消费完则翻下一页；翻页后仍无数据即结束。
+
+        Returns:
+            dict: 单条作品字典（至少含 workid 或 workNumber，其余键可选）。
+
+        Raises:
+            StopIteration: 没有更多作品，迭代结束（框架据此停止本位点迭代）。
+        """
         # 若当前无数据，请求下一页
         if len(self.works) == 0:
             self.get_one_page()

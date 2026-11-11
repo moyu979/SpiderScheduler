@@ -37,6 +37,7 @@
   .st-done    { background: #dcfce7; color: #15803d; }
   .st-failed  { background: #fee2e2; color: #b91c1c; }
   .st-stopped { background: #e5e7eb; color: #4b5563; }
+  .st-noDownloader { background: #f3e8ff; color: #7e22ce; }
 
   .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
   .filters label { color: var(--muted); margin-right: 5px; }
@@ -222,9 +223,9 @@
 
 <script>
 'use strict';
-const WORK_STATES = ['inQueue', 'downloading', 'done', 'failed', 'stopped', 'none'];
+const WORK_STATES = ['inQueue', 'downloading', 'done', 'failed', 'stopped', 'noDownloader', 'none'];
 const POS_STATES = ['inQueue', 'stopped'];
-const STATE_LABEL = { none: '未标记' };
+const STATE_LABEL = { none: '未标记', noDownloader: '无下载器' };
 
 const S = {
   tab: 'works',
@@ -370,7 +371,7 @@ const fmtInfo = (v) => v == null ? '<span class="muted">—</span>'
 
 function renderWorks(data) {
   const rows = data.items.map(w => {
-    const canStop = ['inQueue', 'downloading', 'failed'].includes(w.state);
+    const canStop = ['inQueue', 'downloading', 'failed', 'noDownloader'].includes(w.state);
     const canRequeue = ['stopped', 'failed', 'done'].includes(w.state);
     const acts = [
       canStop ? `<button class="ghost" data-act="stop" data-w="${esc(w.workNumber)}" data-site="${esc(w.website)}">停止</button>` : '',

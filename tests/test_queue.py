@@ -13,6 +13,7 @@ from src.config.config import ConfigManager, GetUnknownKey
 from src.utils.threadPool.threadPool import ThreadPool
 
 from src.service.downloader import Downloader
+from src.service.dispatcher import ScriptRouteError
 from src.server.apis.download_api import DownloadApi
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import Base, Works
@@ -42,6 +43,7 @@ def _state(work_number, website="pixiv"):
 
 
 def test_claim_orders_by_priority_and_skips_states(db):
+    """测试认领按优先级降序、跳过 stopped，NULL 状态视为待下载。"""
     _add(workNumber="A", website="pixiv", state="inQueue", downloadPriority=0)
     _add(workNumber="B", website="pixiv", state="inQueue", downloadPriority=5)
     _add(workNumber="C", website="pixiv", state="stopped", downloadPriority=9)
@@ -56,6 +58,7 @@ def test_claim_orders_by_priority_and_skips_states(db):
 
 
 def test_claim_carries_website_and_downloadinfo(db):
+    """测试认领结果携带 website 与 downloadInfo 字段。"""
     _add(workNumber="W", website="danbooru", state="inQueue", downloadInfo='{"rating":"safe"}')
     d = Downloader()
     work = d._claim_next_work("danbooru")
@@ -64,6 +67,7 @@ def test_claim_carries_website_and_downloadinfo(db):
 
 
 def test_finish_marks_done_with_download_date(db):
+    """测试成功收尾置 done 并记录下载时间。"""
     _add(workNumber="W", website="pixiv", state="inQueue")
     d = Downloader()
     d._claim_next_work('pixiv')
@@ -77,6 +81,7 @@ def test_finish_marks_done_with_download_date(db):
 
 
 def test_finish_marks_failed(db):
+    """测试失败收尾置 failed。"""
     _add(workNumber="W", website="pixiv", state="inQueue")
     d = Downloader()
     d._claim_next_work('pixiv')
@@ -87,6 +92,7 @@ def test_finish_marks_failed(db):
 
 
 def test_finish_does_not_overwrite_stopped(db):
+    """测试收尾不覆盖人工置入的 stopped 状态。"""
     _add(workNumber="W", website="pixiv", state="inQueue")
     d = Downloader()
     d._claim_next_work('pixiv')
@@ -100,6 +106,7 @@ def test_finish_does_not_overwrite_stopped(db):
 
 
 def test_requeue_stale_downloading(db):
+    """测试崩溃回收把残留 downloading 重置回 inQueue。"""
     _add(workNumber="W", website="pixiv", state="downloading")
     _add(workNumber="V", website="pixiv", state="done")
 
@@ -110,6 +117,7 @@ def test_requeue_stale_downloading(db):
 
 
 def test_requeue_api_endpoint(db):
+    """测试 requeue_work 端点的成功与 404 分支。"""
     _add(workNumber="W", website="pixiv", state="failed")
 
     app = Flask(__name__)
@@ -124,30 +132,125 @@ def test_requeue_api_endpoint(db):
     assert resp.status_code == 404
 
 
-# ---------- 下载路径包装（缓存/直写） ----------
+# ---------- 无下载脚本挂起（noDownloader）与刷回 ----------
+
+class FakeMissingDispatcher:
+    """无任何可用脚本：get 抛 ScriptRouteError"""
+
+    def get(self, website):
+        raise ScriptRouteError(f"没有适用于 website={website!r} 的脚本类")
+
+
+class FakeRouteDispatcher:
+    """带站点路由的假分发器（可选兜底），供 requeue_no_downloader 测试"""
+
+    def __init__(self, sites, fallback=False):
+        self.sites = set(sites)
+        self.fallback = fallback
+
+    def websites(self):
+        return sorted(self.sites)
+
+    def has_fallback(self):
+        return self.fallback
+
+
+def test_no_downloader_flags_instead_of_failed(db, cache_env, monkeypatch):
+    """站点无可用下载脚本：任务置 noDownloader 挂起，而非 failed"""
+    _add(workNumber="W", website="pixiv", state="downloading")
+    d = Downloader()
+    monkeypatch.setattr(d, "dispatcher", FakeMissingDispatcher())
+    d._run_download_task({"workNumber": "W", "website": "pixiv", "downloadInfo": None})
+
+    assert _state("W") == "noDownloader"
+
+
+def test_mark_no_downloader_does_not_overwrite_stopped(db):
+    """测试挂起 noDownloader 不覆盖已置入的 stopped 状态。"""
+    _add(workNumber="W", website="pixiv", state="downloading")
+    d = Downloader()
+    # 模拟挂起前被 API 置入 stopped
+    with DatabaseManager.get_db_session() as s:
+        s.get(Works, ("W", "pixiv")).state = "stopped"
+
+    d._mark_no_downloader("W", "pixiv")
+
+    assert _state("W") == "stopped"
+
+
+def test_requeue_no_downloader_flushes_covered_sites_only(db):
+    """只有脚本已就位（路由表命中）的站点挂起作品被刷回"""
+    _add(workNumber="W", website="pixiv", state="noDownloader")
+    _add(workNumber="V", website="danbooru", state="noDownloader")
+    d = Downloader()
+    d.dispatcher = FakeRouteDispatcher(["pixiv"])
+
+    assert d.requeue_no_downloader() == 1
+    assert _state("W") == "inQueue"
+    assert _state("V", "danbooru") == "noDownloader"  # 仍无脚本的站点保持挂起
+
+
+def test_requeue_no_downloader_with_fallback_flushes_all(db):
+    """存在兜底类时任何站点都可用：全部挂起作品刷回"""
+    _add(workNumber="W", website="pixiv", state="noDownloader")
+    _add(workNumber="V", website="danbooru", state="noDownloader")
+    d = Downloader()
+    d.dispatcher = FakeRouteDispatcher(["bilibili"], fallback=True)
+
+    assert d.requeue_no_downloader() == 2
+    assert _state("W") == "inQueue"
+    assert _state("V", "danbooru") == "inQueue"
+
+
+def test_requeue_no_downloader_leaves_other_states(db):
+    """测试刷回只处理挂起态，stopped/failed 等状态保持不动。"""
+    _add(workNumber="W", website="pixiv", state="stopped")
+    _add(workNumber="V", website="pixiv", state="failed")
+    d = Downloader()
+    d.dispatcher = FakeRouteDispatcher(["pixiv"])
+
+    assert d.requeue_no_downloader() == 0
+    assert _state("W") == "stopped"
+    assert _state("V") == "failed"
+
+
+# ---------- 下载路径包装（缓存搬运/原地保留） ----------
 
 class FakeWorker:
-    """按 download_path 写一个文件，返回相对路径；cache_missing 控制不返回路径"""
+    """在站点下载根下自建作品子目录写文件，返回相对路径（与新契约一致）"""
     written = []
 
     def __init__(self, work_info, download_path, download_info=None):
+        self.work_number = work_info.get("workNumber")
         self.download_path = download_path
 
     def download_it(self):
-        path = os.path.join(self.download_path, "img.bin")
-        os.makedirs(self.download_path, exist_ok=True)
+        work_dir = os.path.join(self.download_path, str(self.work_number))
+        os.makedirs(work_dir, exist_ok=True)
+        path = os.path.join(work_dir, "img.bin")
         with open(path, "w") as f:
             f.write("data")
         FakeWorker.written.append(path)
-        return "img.bin"
+        return os.path.join(str(self.work_number), "img.bin")
 
 
 class FakeNoneWorker(FakeWorker):
+    """模拟无产物返回的下载脚本（download_it 返回 None）。"""
+
     def download_it(self):
         return None
 
 
+class FakeRootWorker(FakeWorker):
+    """违规返回站点下载根本身：交付报错，任务标 failed"""
+    def download_it(self):
+        super().download_it()
+        return self.download_path
+
+
 class FakeDispatcher:
+    """对任何站点都返回固定 worker 的假分发器。"""
+
     def __init__(self, worker):
         self.worker = worker
 
@@ -157,6 +260,7 @@ class FakeDispatcher:
 
 @pytest.fixture()
 def cache_env(tmp_path, monkeypatch):
+    """预置缓存/最终目录的 download 配置，返回两个目录路径。"""
     final_root = tmp_path / "final"
     cache_root = tmp_path / "cache"
     ConfigManager.config_dict["download"] = {
@@ -178,18 +282,32 @@ def _run_with(d, worker, monkeypatch, work_number="W", website="pixiv"):
     d._run_download_task({"workNumber": work_number, "website": website, "downloadInfo": None})
 
 
-def test_cache_on_copies_to_final_and_cleans(db, cache_env, monkeypatch):
+def test_cache_on_moves_to_final_and_cleans(db, cache_env, monkeypatch):
+    """测试缓存模式产物按相对层级搬到最终路径并清理缓存侧残留。"""
     _add(workNumber="W", website="pixiv", state="downloading")
     d = Downloader()
     _run_with(d, FakeWorker, monkeypatch)
 
     final_file = cache_env["final"] / "pixiv" / "W" / "img.bin"
-    assert final_file.read_text() == "data"           # 产物已拷贝到最终路径（站点/作品两级目录）
-    assert not (cache_env["cache"] / "pixiv" / "W").exists()  # 缓存工作目录已清理
+    assert final_file.read_text() == "data"           # 产物按相对层级搬到最终路径
+    assert not (cache_env["cache"] / "pixiv" / "W").exists()  # 缓存侧作品残留已清理
+    assert _state("W") == "done"
+
+
+def test_cache_same_as_download_keeps_in_place(db, cache_env, monkeypatch):
+    """cache_path 与 download_path 一致视为未配缓存层：产物原地保留不搬运"""
+    ConfigManager.config_dict["download"]["site"]["default"]["cache_path"] = \
+        str(cache_env["final"])
+    _add(workNumber="W", website="pixiv", state="downloading")
+    d = Downloader()
+    _run_with(d, FakeWorker, monkeypatch)
+
+    assert (cache_env["final"] / "pixiv" / "W" / "img.bin").read_text() == "data"
     assert _state("W") == "done"
 
 
 def test_cache_off_writes_final_directly(db, cache_env, monkeypatch):
+    """测试关闭缓存时脚本直写最终目录，全程不碰缓存。"""
     ConfigManager.config_dict["download"]["site"]["default"]["use_cache"] = False
     _add(workNumber="W", website="pixiv", state="downloading")
     d = Downloader()
@@ -200,16 +318,54 @@ def test_cache_off_writes_final_directly(db, cache_env, monkeypatch):
     assert _state("W") == "done"
 
 
+def test_root_payload_rejected(db, cache_env, monkeypatch):
+    """返回站点下载根本身属违规：交付报错，任务标 failed"""
+    _add(workNumber="W", website="pixiv", state="downloading")
+    d = Downloader()
+    _run_with(d, FakeRootWorker, monkeypatch)
+    assert _state("W") == "failed"
+
+
+def test_deliver_maps_relative_and_absolute(tmp_path):
+    """相对站点根与绝对路径两种返回形态都按相对层级搬运，并清理缓存顶层残留"""
+    cache_root = tmp_path / "cache"
+    download_root = tmp_path / "final"
+    site = cache_root / "pixiv"
+    (site / "W1").mkdir(parents=True)
+    (site / "W1" / "a.bin").write_text("A")
+    (site / "W2").mkdir()
+    (site / "W2" / "b.bin").write_text("B")
+
+    d = Downloader()
+    dest = d._deliver_to_final(str(cache_root), str(download_root), "W1/a.bin", "pixiv")
+    assert (download_root / "pixiv" / "W1" / "a.bin").read_text() == "A"
+    assert dest == str(download_root / "pixiv" / "W1" / "a.bin")
+    assert not (site / "W1").exists()                 # 缓存侧整个作品目录已清理
+
+    dest = d._deliver_to_final(str(cache_root), str(download_root),
+                               str(site / "W2" / "b.bin"), "pixiv")
+    assert (download_root / "pixiv" / "W2" / "b.bin").read_text() == "B"
+    assert not (site / "W2").exists()                 # 顶层残留（空作品目录）一并清理
+
+
+def test_deliver_rejects_root_and_escape(tmp_path):
+    """返回站点根本身、或指向缓存根之外的路径都拒绝搬运"""
+    cache_root = tmp_path / "cache"
+    (cache_root / "pixiv").mkdir(parents=True)
+    d = Downloader()
+    with pytest.raises(RuntimeError):
+        d._deliver_to_final(str(cache_root), str(tmp_path / "final"), ".", "pixiv")
+    with pytest.raises(RuntimeError):
+        d._deliver_to_final(str(cache_root), str(tmp_path / "final"), "/etc/hosts", "pixiv")
+
+
 def test_cache_on_without_payload_marks_failed(db, cache_env, monkeypatch):
+    """测试缓存模式下脚本不返回产物路径时任务标 failed。"""
     _add(workNumber="W", website="pixiv", state="downloading")
     d = Downloader()
     _run_with(d, FakeNoneWorker, monkeypatch)
 
     assert _state("W") == "failed"                    # 缓存模式必须返回产物路径
-
-
-def test_unsafe_work_subdir_sanitized():
-    assert Downloader._work_subdir("a/b:c?") == "a_b_c_"
 
 
 # ---------- 每站点独立配置 ----------
@@ -249,6 +405,7 @@ def test_site_setting_code_fallback():
 
 
 def test_claim_isolated_per_site(db):
+    """测试按站点认领互不越界，高优先级站点不抢别站任务。"""
     # danbooru 优先级更高，但按站点认领互不越界
     _add(workNumber="P1", website="pixiv", state="inQueue", downloadPriority=0)
     _add(workNumber="D1", website="danbooru", state="inQueue", downloadPriority=9)
@@ -259,6 +416,7 @@ def test_claim_isolated_per_site(db):
 
 
 def test_pending_sites(db):
+    """测试待调度站点集合只含有待下载作品的站点。"""
     _add(workNumber="P1", website="pixiv", state="inQueue")
     _add(workNumber="P2", website="pixiv", state="done")
     _add(workNumber="D1", website="danbooru", state="stopped")
@@ -274,17 +432,20 @@ def _window(site_window, now, website="pixiv"):
 
 
 def test_window_unset_always_allows():
+    """测试未配置下载窗口时任何时间都可下载。"""
     ConfigManager.config_dict["download"] = {"site": {"pixiv": {}}}
     assert Downloader._in_download_window("pixiv", now=datetime(2026, 11, 1, 12, 0)) is True
 
 
 def test_daily_window_inside_and_outside():
+    """测试 daily 窗口内外的判定。"""
     win = {"mode": "daily", "start": "00:00", "end": "08:00"}
     assert _window(win, datetime(2026, 11, 1, 3, 0)) is True
     assert _window(win, datetime(2026, 11, 1, 12, 0)) is False
 
 
 def test_daily_window_overnight_wrap():
+    """测试跨夜窗口（start > end）的正确判定。"""
     win = {"mode": "daily", "start": "22:00", "end": "06:00"}
     assert _window(win, datetime(2026, 11, 1, 23, 0)) is True
     assert _window(win, datetime(2026, 11, 2, 5, 0)) is True
@@ -292,6 +453,7 @@ def test_daily_window_overnight_wrap():
 
 
 def test_weekly_window_matches_isoweekday():
+    """测试 weekly 窗口按 isoweekday 匹配星期。"""
     win = {"mode": "weekly", "start": "00:00", "end": "23:59", "weekdays": [1]}
     monday = datetime(2026, 11, 2, 3, 0)   # isoweekday=1
     tuesday = datetime(2026, 11, 3, 3, 0)  # isoweekday=2
@@ -301,6 +463,7 @@ def test_weekly_window_matches_isoweekday():
 
 
 def test_monthly_window_with_negative_days():
+    """测试 monthly 窗口支持负数天（倒数第 N 天）。"""
     win = {"mode": "monthly", "start": "00:00", "end": "23:59", "month_days": [1, -1]}
     # 2026 年 2 月有 28 天：-1 = 28 号
     assert _window(win, datetime(2026, 2, 1, 12, 0)) is True
@@ -310,6 +473,7 @@ def test_monthly_window_with_negative_days():
 
 
 def test_window_combined_with_time_range():
+    """测试 monthly 日期命中后仍受时间段约束。"""
     # monthly 命中当天但不在时间段内 → 不可下载
     win = {"mode": "monthly", "start": "00:00", "end": "08:00", "month_days": [1]}
     assert _window(win, datetime(2026, 11, 1, 3, 0)) is True
@@ -317,6 +481,7 @@ def test_window_combined_with_time_range():
 
 
 def test_window_fail_open_on_bad_config():
+    """测试非法窗口配置时放行（fail-open）。"""
     assert _window({"mode": "daily", "start": "不是时间", "end": "08:00"},
                    datetime(2026, 11, 1, 12, 0)) is True  # 非法配置放行
     assert _window({"mode": "monthly"}, datetime(2026, 11, 1, 12, 0)) is True  # 无 month_days 视为不命中？→ 放行由 mode 分支决定
@@ -325,6 +490,7 @@ def test_window_fail_open_on_bad_config():
 # ---------- 调度周期配置化 ----------
 
 def test_tick_reads_config_and_falls_back():
+    """测试调度周期读取配置、缺键回落默认值与最小 1 秒下限保护。"""
     ConfigManager.config_dict["download"] = {"site_scan_interval": 9}
     assert Downloader._tick("site_scan_interval", 5) == 9          # 配置覆盖
     assert Downloader._tick("window_check_interval", 60) == 60     # 键缺失回落默认

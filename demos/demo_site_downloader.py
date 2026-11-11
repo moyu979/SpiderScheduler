@@ -22,8 +22,11 @@ def normalize_cookies(cookies) -> str:
     """把三种常见 cookie 形态归一成 "k1=v1; k2=v2" 请求头字符串。
 
     Args:
-        cookies: 支持 str（"k1=v1; k2=v2" 原样返回）、{name: value} dict
-            （或单条 Selenium cookie）、Selenium 格式 list[dict]，其余返回 ""。
+        cookies: 支持以下三种形态，其余返回空串：
+            - str: "k1=v1; k2=v2"（原样返回）
+            - dict: {name: value}，或单条 Selenium cookie（同时含 name/value 键）
+            - list[dict]: Selenium 格式 [{"name": ..., "value": ...}, ...]，
+              与 CookieManager 文件存储、浏览器 get_cookies()/add_cookie() 同构
 
     Returns:
         str: 可直接作 requests 的 Cookie 请求头的字符串，无 cookie 时为 ""。
@@ -51,6 +54,18 @@ def normalize_cookies(cookies) -> str:
 
 
 class DemoDownloadWork(DownloadWork):
+    """demo 站点下载脚本：可运行的 DownloadWork 行为示例。
+
+    展示三类要点：website 路由声明、cookie 三级优先级解析（内存
+    download_info["cookies"] > 文件 cookie_manager > 匿名）、产物写入本任务
+    目录并返回相对路径。demo 站点会把收到的 Cookie 回显在响应头，运行日志
+    里可核对 cookie 来源链路。
+
+    Attributes:
+        website: 路由站点名，必须与 Works.website 一致（此处固定 "demo"）。
+        DEMO_BASE: demo 站点入口地址；run_demo.py 会改写本类属性指向本地
+            假站点，真实站点脚本直接写死或用环境变量注入。
+    """
     # 分发器按 website 路由：站点名必须与作品（Works.website）一致
     website = "demo"
 
@@ -59,11 +74,13 @@ class DemoDownloadWork(DownloadWork):
     DEMO_BASE = os.environ.get("DEMO_SITE_URL", "http://127.0.0.1:9377")
 
     def __init__(self, work_info, download_path, download_info=None):
-        """
+        """初始化 demo 下载器：调用基类后记录任务参数与内存 cookie 入口。
+
         Args:
-            work_info (dict): 作品快照，关键键 workNumber / website。
-            download_path (str): 本任务专属目录，产物写在这里并返回路径。
-            download_info (dict | None): downloadInfo 反序列化后的统一下载参数；
+            work_info: 作品快照，关键键 workNumber / website。
+            download_path: 站点级下载根 <根>/demo/；作品子目录由脚本
+                自建（_work_subdir 过滤 workNumber），产物写进去后返回相对路径。
+            download_info: downloadInfo 反序列化后的统一下载参数；
                 内存传入方式约定其 "cookies" 键携带 cookie（形态见
                 normalize_cookies），其余键按站点需要自由定义。
         """
@@ -100,13 +117,18 @@ class DemoDownloadWork(DownloadWork):
         return "", "无 cookie（未登录状态请求）"
 
     def _log(self, message):
+        """经框架注入的 logger 输出日志；未注入 logger 时静默跳过。"""
         if self.logger is not None:
             self.logger.info(message)
 
     # ---------------- 下载（框架调用面） ----------------
 
     def download_it(self):
-        """下载入口：拉取作品数据写入本任务目录，返回产物路径。"""
+        """下载入口：拉取作品数据写入本任务目录，返回产物路径。
+
+        Returns:
+            str: 相对 download_path（站点下载根）的产物路径。
+        """
         header, source = self._resolve_cookies()
         url = f"{self.DEMO_BASE}/works/{self.work_number}/data"
         resp = requests.get(
@@ -123,10 +145,13 @@ class DemoDownloadWork(DownloadWork):
             f"cookie来源={source} 站点收到Cookie={resp.headers.get('X-Received-Cookie') or '(无)'}"
         )
 
-        target = os.path.join(self.download_path, f"{self.work_number}.txt")
+        # 站点下载根下自建作品子目录，产物写进去
+        work_dir = os.path.join(self.download_path, self._work_subdir(self.work_number))
+        os.makedirs(work_dir, exist_ok=True)
+        target = os.path.join(work_dir, f"{self.work_number}.txt")
         with open(target, "w", encoding="utf-8") as f:
             f.write(resp.text)
 
-        # 返回产物路径（绝对或相对 download_path）；
-        # 视频类站点可返回 {"path": target, "duration": 3.0} 供 waiting_play 使用
-        return target
+        # 返回产物路径：相对 download_path（站点下载根）的相对路径；
+        # 视频类站点可返回 {"path": ..., "duration": 3.0} 供 waiting_play 使用
+        return os.path.relpath(target, self.download_path)

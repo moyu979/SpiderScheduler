@@ -1,9 +1,11 @@
-"""DownloadWork 站点脚本模板：部署骨架 + 脚本契约的唯一文档来源。
+"""DownloadWork 站点脚本模板：部署骨架与兜底下载脚本基类。
 
 本文件会被 init_files 补装到 BASEPATH/scripts/，承担双重角色：
 - 传统单文件兜底：全部脚本类都不声明 website 时，这里的 DownloadWork 对
   未路由站点兜底生效（dispatcher 的 fallback_class_name 即 "DownloadWork"）；
-- 契约文档：写真实站点脚本时按本文件的约定实现即可（可继承本基类，也可
+- 契约参考：契约的完整叙述见 docs/interfaces.zh-CN.md（英文版
+  docs/interfaces.en.md），本文件是部署模板与兜底类，docstring 与接口文档
+  保持一一对应。写真实站点脚本时按这里的约定实现即可（可继承本基类，也可
   直接新建类——分发器只认 website 属性）。可运行的行为示例见
   demos/demo_site_downloader.py（对本地虚拟站点）与 scripts/bilibili/（真实站点）。
 
@@ -12,12 +14,16 @@
 - __init__(work_info, download_path, download_info=None)：
     work_info:     作品快照 {workNumber, website, upTime, title, kind, state,
                    downloadDate, downloadPriority, downloadInfo}
-    download_path: 本任务专属目录（框架已建好；缓存开关对脚本透明，产物写
-                   在这里并把路径返回即可）
+    download_path: 站点级下载根 <根>/<website>/（use_cache 开 → 缓存根，
+                   关 → 最终保存根；缓存开关对脚本透明）。作品子目录由脚本
+                   自己拼（建议 _work_subdir 过滤 workNumber 后命名）
     download_info: works.downloadInfo（JSON 文本）反序列化后的统一下载参数
 - download_it() 执行下载并返回产物路径，抛出异常即任务失败：
-    str:                          产物绝对路径，或相对 download_path 的相对路径
+    str:                          产物路径——相对 download_path（站点下载根）
+                                  的相对路径，或绝对路径
     {"path": ..., "duration": 秒}: duration 供站点 waiting_play 模拟播放时长
+  交付规则：缓存层与最终层路径不一致时，框架按相对层级把产物搬到最终保存
+  根 <download_path根>/<website>/ 下并清理缓存残留；一致时原地保留。
 - 框架注入实例属性（构造完成后赋值，因此不要在 __init__ 里读取）：
     logger（SpiderLogger）、config_manager（ConfigManager 单例）、
     cookie_manager（CookieManager 类）、tools（ScriptTools，见下）
@@ -45,8 +51,26 @@ tools（src/service/script_tools.py，与任务站点绑定）：
     # requirements: requests>=2.31, beautifulsoup4
 """
 
+import re
+
 
 class DownloadWork:
+    """站点下载脚本基类：兜底骨架，具体下载逻辑由子类实现 download_it()。
+
+    完整契约见模块 docstring（与 docs/interfaces.zh-CN.md 一一对应）；
+    写站点脚本可继承本类，也可直接新建类——分发器只认 website 属性。
+
+    Attributes:
+        website: 本类适用的站点名（str）或站点列表；None 表示未声明，
+            全部脚本类均未声明时由本类兜底。
+        config_manager: 框架注入的 ConfigManager 单例（构造完成后赋值，
+            因此不要在 __init__ 里读取）。
+        logger: 框架注入的 SpiderLogger（构造完成后赋值）。
+        cookie_manager: 框架注入的 cookie 入口，默认 CookieManager 类（文件
+            传入）；以库方式使用时可换成任何同接口对象（如
+            demos/in_memory_cookie_manager.py），脚本代码无需改动。
+        tools: 框架注入的 ScriptTools，与任务站点绑定（能力见模块 docstring）。
+    """
     # 声明本类适用的站点，如 "pixiv"，也可以给列表 ["pixiv", "danbooru"]。
     # 同一文件可放多个站点的类；全部类都不声明时，本文件作为传统单站点脚本兜底。
     website = None
@@ -64,7 +88,8 @@ class DownloadWork:
 
         Args:
             work_info: 作品快照，关键键 workNumber（站点内唯一标识）/ website。
-            download_path: 本任务专属目录，产物写在这里并返回该路径。
+            download_path: 站点级下载根 <根>/<website>/；作品子目录由脚本自建
+                （建议用 _work_subdir 过滤 workNumber 命名），产物写进去后返回路径。
             download_info: downloadInfo 反序列化后的统一下载参数（如清晰度、
                 格式、标签等站点相关配置）；约定其 "cookies" 键可携带任务级
                 cookie（形态见模块文档），无则传空。
@@ -72,13 +97,20 @@ class DownloadWork:
         # 基础骨架：仅保存必要状态，具体实现由子类完成
         pass
 
+    @staticmethod
+    def _work_subdir(work_number) -> str:
+        """作品子目录名：过滤文件系统不安全字符，供脚本在下载根下自建子目录。"""
+        return re.sub(r'[^A-Za-z0-9_\-.]', '_', str(work_number))
+
     def download_it(self) -> str | dict:
         """下载入口：框架调用本方法执行下载；抛出异常即视为任务失败。
 
         Returns:
             str | dict: 下载产物的路径——
-            - str: 产物的绝对路径，或相对 download_path 的相对路径（缓存开启时,
-              框架据此把数据拷贝到最终保存路径）
+            - str: 相对 download_path（站点下载根）的相对路径，或绝对路径。
+              缓存层与最终层路径不一致时，框架按相对层级把产物搬到最终保存
+              根 <download_path根>/<website>/ 下并清理缓存残留；一致时原地
+              保留
             - dict: {"path": 产物路径, "duration": 秒（可选，供 waiting_play
               模拟播放时长）}
         """

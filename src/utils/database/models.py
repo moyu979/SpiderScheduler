@@ -26,8 +26,9 @@ class Works(Base):
         title: 作品标题。
         kind: 作品类型（站点自定义，如 vip/normal 或页面徽标文本）。
         state: 下载管线状态：inQueue → downloading → done/failed，stopped
-            可随时由 API 置入；NULL 视为 inQueue（兼容旧数据）。源站自身的
-            作品状态存 otherInfo 的 siteState 键。
+            可随时由 API 置入；站点暂无下载脚本时置 noDownloader 挂起，脚本
+            就位后自动刷回 inQueue；NULL 视为 inQueue（兼容旧数据）。源站
+            自身的作品状态存 otherInfo 的 siteState 键。
         downloadDate: 下载完成时间（ISO 字符串）。
         downloadPriority: 下载优先级，认领时按其降序取最前。
         otherInfo: 源站附加信息（JSON 文本，含 siteState）。
@@ -43,6 +44,7 @@ class Works(Base):
     title = Column(String)
     kind = Column(String)
     # 下载管线状态: inQueue -> downloading -> done/failed，stopped 可随时置入；
+    # noDownloader = 站点暂无下载脚本挂起，脚本就位后自动刷回 inQueue；
     # NULL 视为 inQueue（兼容旧数据）。源站自身的作品状态存 otherInfo 的 siteState 键
     state = Column(String)
     downloadDate = Column(String)

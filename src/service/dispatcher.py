@@ -1,5 +1,4 @@
-"""
-脚本分发器：按 website 把作品/用户路由到对应的用户脚本类
+"""脚本分发器：按 website 把作品/用户路由到对应的用户脚本类。
 
 支持多文件来源：每个文件一个（或多个）站点类，路由表跨文件合并；
 网站到类的映射完全由类声明的 website 属性决定。
@@ -44,7 +43,16 @@ def parse_requirements(text):
 
 
 def declared_websites(content):
-    """静态解析脚本源码中各类声明的 website（不执行代码），返回站点名列表"""
+    """静态解析脚本源码中各类声明的 website（不执行代码）。
+
+    仅做 AST 级解析，不导入、不执行脚本代码。
+
+    Args:
+        content: 脚本源码全文。
+
+    Returns:
+        list[str]: 各类声明的站点名列表（保持声明顺序，已去空白）。
+    """
     sites = []
     try:
         tree = ast.parse(content)
@@ -74,12 +82,28 @@ def declared_websites(content):
 
 
 def _spec_name(spec):
-    """取需求中的发行包名（去掉版本说明与环境标记）"""
+    """取需求中的发行包名（去掉版本说明与环境标记）。
+
+    Args:
+        spec: 单条需求字符串（如 ``pkg>=1.0; python_version>="3.8"``）。
+
+    Returns:
+        str: 发行包名。
+    """
     return re.split(r'[<>=!~;\[\s]', spec, maxsplit=1)[0].strip()
 
 
 def _satisfied(spec):
-    """需求是否已满足：未安装为不满足；装了 packaging 时校验版本约束，否则只看是否已安装"""
+    """判断单条需求是否已满足。
+
+    未安装视为不满足；装了 packaging 时按版本约束精确校验，否则只看是否已安装。
+
+    Args:
+        spec: 单条需求字符串。
+
+    Returns:
+        bool: 需求是否已满足。
+    """
     name = _spec_name(spec)
     if not name:
         return True
@@ -141,12 +165,11 @@ def ensure_requirements(script_path):
 
 
 class ScriptRouteError(Exception):
-    """没有找到适用于指定 website 的脚本类"""
+    """没有找到适用于指定 website 的脚本类。"""
 
 
 class ScriptDispatcher:
-    """
-    加载用户脚本模块（支持多文件来源），按 website 属性在多个脚本类之间路由。
+    """加载用户脚本模块（支持多文件来源），按 website 属性在多个脚本类之间路由。
 
     约定：
     - sources 是"返回脚本文件路径列表"的函数（或直接给 str/list），按优先级排序；
@@ -155,6 +178,13 @@ class ScriptDispatcher:
       路由表跨文件合并：同一站点在多个文件重复声明时先加载的生效并告警。
     - 某文件内没有任何类声明 website 时，其 fallback_class_name 类可作为兜底
       （至多取第一个），对未被路由到的 website 生效（向后兼容旧单文件）。
+
+    Attributes:
+        sources: 脚本文件来源（callable 或 str/list），按优先级排序。
+        fallback_class_name: 文件内无 website 声明时作为兜底的类名。
+        _routes: website → 脚本类的路由表。
+        _wildcard: 对任意站点生效的兜底类（无则 None）。
+        _file_routes: path → 该文件声明的站点名列表。
     """
 
     def __init__(self, sources, fallback_class_name: str):
@@ -190,7 +220,14 @@ class ScriptDispatcher:
         return [p for p in sources if p and os.path.exists(p)]
 
     def load(self):
-        """（重新）求值文件来源并逐个加载，跨文件合并路由表；失败时旧路由原样保留"""
+        """（重新）求值文件来源并逐个加载，跨文件合并路由表。
+
+        逐文件安装声明依赖并加载模块；全部解析成功后一次性提交新路由，
+        失败时旧路由原样保留。
+
+        Raises:
+            AttributeError: 所有来源既无 website 声明也找不到兜底类。
+        """
         paths = self._resolve_paths()
         routes, file_routes, wildcard = {}, {}, None
         for path in paths:
@@ -245,14 +282,14 @@ class ScriptDispatcher:
                         + (f"；兜底 {wildcard.__name__}" if wildcard else ""))
 
     def snapshot(self):
-        """当前路由表快照（website -> 类名），供系统 API 展示"""
+        """当前路由表快照（website -> 类名），供系统 API 展示。"""
         return {
             'websites': {w: c.__name__ for w, c in sorted(self._routes.items())},
             'fallback': self._wildcard.__name__ if self._wildcard else None,
         }
 
     def sites_by_file(self):
-        """每个已加载文件声明的站点列表（供上传冲突检测）"""
+        """每个已加载文件声明的站点列表（供上传冲突检测）。"""
         return {path: list(sites) for path, sites in self._file_routes.items()}
 
     def get(self, website):
@@ -279,5 +316,9 @@ class ScriptDispatcher:
         )
 
     def websites(self):
-        """已注册的站点列表"""
+        """已注册的站点列表。"""
         return sorted(self._routes.keys())
+
+    def has_fallback(self):
+        """是否存在对任意站点生效的兜底类。"""
+        return self._wildcard is not None

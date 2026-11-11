@@ -5,7 +5,8 @@
 管理与触发重扫：
 
 - 两级冲突检测：同名文件已存在、website 与其他脚本重复 → 409 交由用户决定覆盖（force）；
-- 保存/删除成功后立即重新扫描分发器，新文件即刻生效；扫描失败保留旧路由并返回原因。
+- 保存/删除成功后立即重新扫描分发器，新文件即刻生效；扫描失败保留旧路由并返回原因；
+- 下载脚本重扫成功后，站点已就位脚本的 noDownloader 挂起作品自动刷回 inQueue。
 
 注意：脚本来源列表（含传统单文件）每次重扫重新求值，因此手工放入目录的文件
 也会在下一次重扫时被发现。
@@ -72,6 +73,11 @@ def _other_declared_websites(kind, target_path, sources_fn):
     已加载的分发器路由（sites_by_file）与磁盘上尚未加载的文件都会计入，
     用于上传时的 website 冲突检测。
 
+    Args:
+        kind: 脚本种类（download / update）。
+        target_path: 目标文件路径（其自身的声明不计入）。
+        sources_fn: 该种类的脚本来源列表函数。
+
     Returns:
         set[str]: 被其他文件占用的站点名集合。
     """
@@ -96,6 +102,12 @@ def _other_declared_websites(kind, target_path, sources_fn):
 def _rescan_dispatcher(kind):
     """重新扫描指定种类的分发器。
 
+    下载脚本重扫成功后，把站点已就位脚本的 noDownloader 挂起作品刷回
+    inQueue（上传下载器即刻恢复下载）。
+
+    Args:
+        kind: 脚本种类（download / update）。
+
     Returns:
         dict: {'ok': True, 'snapshot': ...} 或 {'ok': False, 'error': ..., 'snapshot': ...}。
         重扫失败时分发器保留旧路由，调用方应把结果透传给前端提示。
@@ -105,10 +117,12 @@ def _rescan_dispatcher(kind):
         return {'ok': True}
     try:
         d.load()
-        return {'ok': True, 'snapshot': d.snapshot()}
     except Exception as e:
         logger.error(f"脚本 {kind} 重新扫描失败（保留旧路由）: {e}")
         return {'ok': False, 'error': str(e), 'snapshot': d.snapshot()}
+    if kind == 'download':
+        downloader.requeue_no_downloader()
+    return {'ok': True, 'snapshot': d.snapshot()}
 
 
 class ScriptApi:
@@ -116,9 +130,13 @@ class ScriptApi:
 
     提供脚本路由表查看、热重载、多文件上传（含冲突检测与覆盖确认）、
     按文件名查看内容与删除。所有写操作完成后都会触发一次重新扫描。
+
+    Attributes:
+        blueprint: 挂载全部路由的 Flask 蓝图。
     """
 
     def __init__(self):
+        """创建蓝图并注册全部脚本管理路由。"""
         self.blueprint = Blueprint('system_script_api', __name__, url_prefix='/api/system')
         self._register_routes()
 
@@ -147,6 +165,8 @@ class ScriptApi:
                     continue
                 try:
                     d.load()
+                    if name == 'download':
+                        downloader.requeue_no_downloader()
                 except Exception as e:
                     logger.error(f"重载 {name} 脚本失败（保留旧路由）: {e}")
                     errors.append(f"{name}: {e}")

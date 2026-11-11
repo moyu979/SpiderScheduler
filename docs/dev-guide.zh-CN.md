@@ -16,7 +16,7 @@ main.py ──► src/core/initialization.py（统一 init：文件→配置→�
  （热重载）      + 前端托管        dispatcher          threadPool/dynamic_loader
 ```
 
-依赖方向自上而下、无反向引用。全库 ~5400 行 Python + 958 行前端单页。
+依赖方向自上而下、无反向引用。全库 ~5900 行 Python + 959 行前端单页。
 
 关键设计决策（背景与理由）：
 
@@ -45,6 +45,7 @@ publish_pos（发布位点）       works                          upload
 - `publish_pos.state`: `inQueue` ⇄ `stopped`（stopped 的位点被 updater 跳过）。
 - `works.state`（下载管线）: `inQueue（或 NULL，兼容旧数据）→ downloading → done / failed`；
   `stopped` 可随时置入：调度跳过、完成回调不覆盖；崩溃残留的 `downloading` 每轮开始重置回 `inQueue`。
+  站点无下载脚本时置 `noDownloader` 挂起（不标 failed），脚本上传/重载/启动时自动刷回 `inQueue`。
 - 源站自身的作品状态不入 `state`，存 `otherInfo` 的 `siteState` 键（JSON）。
 
 ### 2.2 实现要点与陷阱
@@ -83,30 +84,29 @@ ScriptDispatcher.load()
      `sites_by_file()` 供上传端点做 website 冲突检测。
 ```
 
-- 分发：`dispatcher.get(website)` 精确匹配 → 兜底 → `ScriptRouteError`（报可用站点）。
+- 分发：`dispatcher.get(website)` 精确匹配 → 兜底 → `ScriptRouteError`（报可用站点）；
+  `has_fallback()`/`websites()` 供下载侧判断站点是否已有可用脚本。
 - `snapshot()` 返回路由表快照，供系统页展示。
-- 脚本实例注入：`logger`（SpiderLogger 类）、`config_manager`、`cookie_manager`（类本身，
-  classmethod 风格）。
+- 脚本实例注入（构造完成后赋值）：`logger`（SpiderLogger 类）、`config_manager`、
+  `cookie_manager`（类本身，classmethod 风格）、`tools`（ScriptTools 实例）。
 
-### 3.1 DownloadWork 契约
+### 3.1 契约速览
 
 ```python
-def __init__(self, work_info: dict, download_path: str, download_info: dict | None)
+# DownloadWork（下载脚本）
+def __init__(self, work_info, download_path, download_info=None)
 def download_it(self) -> str | dict   # str=产物路径；dict={path, duration?}
+
+# UpdateUser（更新脚本）
+def __init__(self, usr, logging)      # usr = {authorId, website, addTime}
+def __iter__ / __next__               # 逐条产出作品 dict，顺序必须从新到旧
 ```
 
-`download_path` 由包装层决定（见 §5.2），目录已创建。返回值缺路径在 cache 模式下视为失败。
-
-### 3.2 UpdateUser 契约
-
-```python
-def __init__(self, usr: dict, logging)   # usr = {authorId, website, addTime}
-def __iter__ / __next__                  # 逐条产出 dict：
-# workid|workNumber(必填)、upTime、title、kind、state(→otherInfo.siteState)、
-# downloadDate、downloadPriority
-```
-
-`upload` 关联已存在时停止本位点迭代（增量同步语义）——**产出顺序必须从新到旧**。
+两个契约的完整叙述——注入属性、`download_path` 站点级下载根与产物交付规则、
+`noDownloader` 挂起语义、增量同步、站点配置键、`ScriptTools`/`CookieManager`
+接口——统一见 [接口文档](interfaces.zh-CN.md)；脚本模板
+`src/assets/scripts/download_a_work.py` / `update_a_user.py` 的模块 docstring
+与该文档一一对应，并随部署落到 `scripts/` 目录。
 
 ## 4. 调度器内部
 
@@ -134,9 +134,12 @@ _site_loop：站点级 do_download 关闭即退出（恢复后守护线程重拉
 ```
 
 - `_claim_next_work(website)`：认领即置 downloading，**单线程认领免竞态**；必须在会话内转 dict。
-- `_run_download_task`：按站点解析 use_cache/download_path 等 → 实例化脚本 → `download_it()` →
-  cache 模式 `_deliver_to_final()`（拷贝到 `download_path/<website>/<work>/` + rmtree 缓存目录）→
-  `_finish_work`。
+- `_run_download_task`：按站点解析 use_cache/download_path 等 → 把站点级下载根交给脚本
+  （作品子目录脚本自建）→ `download_it()` → cache 模式 `_deliver_to_final()`
+  （cache 根 ≠ download 根时按相对层级搬运到 `download_path/<website>/` 并清理缓存残留；
+  两层一致原地保留）→ `_finish_work`。`ScriptRouteError` 单独捕获：置 `noDownloader` 挂起。
+- `requeue_no_downloader()`：把站点已就位脚本（路由命中，或存在兜底类）的挂起作品刷回
+  `inQueue`，在 `init()` 与脚本上传/重载成功后调用；仍无脚本的站点保持挂起避免空转。
 - `stop()`：置全局 Event（所有 sleep 都是 `Event.wait`，可唤醒）+ 逐池 shutdown(wait=True,
   cancel_futures=True)。已知噪音：若调度线程恰在 submit 时被关池，会记一条无害 error。
 
@@ -180,7 +183,7 @@ _site_loop：站点级 do_download 关闭即退出（恢复后守护线程重拉
 ## 8. 测试
 
 ```bash
-python3 -m pytest tests/          # 124 例
+python3 -m pytest tests/          # 132 例
 ```
 
 | 文件 | 覆盖 |
@@ -188,7 +191,7 @@ python3 -m pytest tests/          # 124 例
 | test_models | 复合外键 DEFERRABLE、downloadInfo、关系导航 |
 | test_dispatcher | 路由/兜底/重载安全/requirements |
 | test_config | 副本换入原子性、env 内存覆盖、replace_section、${BASE_PATH} |
-| test_queue | 认领排序/状态回写/stopped 保护/崩溃回收/缓存包装/每站隔离 |
+| test_queue | 认领排序/状态回写/stopped 保护/崩溃回收/noDownloader 挂起与刷回/缓存搬运与原地保留/每站隔离 |
 | test_updater | 站点级配置解析、每站点调度、产出从新到旧、page_interval 灌参 |
 | test_script_tools | 日志出口、站点地址、Selenium 装配桩测、动态注册 |
 | test_e2e | 内嵌虚拟站点 + 真实调度全链路 |
@@ -220,5 +223,5 @@ python3 -m pytest tests/          # 124 例
 
 - REST API 无鉴权（0.0.0.0，仅限内网）；cookie 文件明文。
 - 登录代理会话进程内单例——gunicorn 多 worker 部署会分裂；`requests.Session` 非严格线程安全。
-- 缓存模式下拷贝前崩溃会残留缓存目录（重下覆盖，无害但累积，可手动清理）。
+- 缓存模式下搬运前崩溃会残留缓存目录（重下覆盖，无害但累积，可手动清理）。
 - `download_thread` 热改不生效（需重启）。

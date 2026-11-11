@@ -13,19 +13,29 @@ from src.utils.database.models import Works
 from src.config.config import GetUnknownKey
 
 class DownloadApi:
-    """作品/下载队列管理端点：入队、停止、重排与下载配置更新。"""
-    
+    """作品/下载队列管理端点：入队、停止、重排与下载配置更新。
+
+    Attributes:
+        blueprint: 挂载全部路由的 Flask 蓝图。
+    """
+
     def __init__(self):
+        """创建蓝图并注册全部下载管理路由。"""
         self.blueprint = Blueprint('download_api', __name__, url_prefix='/api/download')
         self._register_routes()
-    
-    def _register_routes(self):
-        """注册下载管理相关路由"""
 
-        #更新下载配置
+    def _register_routes(self):
+        """注册下载管理相关路由。"""
+
+        # 更新下载配置
         @self.blueprint.route('/config', methods=['PUT'])
         def update_download_config():
-            """更新下载配置"""
+            """更新下载配置。
+
+            Returns:
+                JSON：success 与 updated_keys；部分键失败时 400 附 errors，
+                请求体为空或 download 段不存在 400，整体异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -85,10 +95,16 @@ class DownloadApi:
                     'error': f'更新配置失败: {str(e)}'
                 }), 500
         
-        #增加下载的作品，通过orm实现，将作品id直接写到数据库的works中，其他的参数先空着就行
+        # 增加下载的作品，通过 orm 实现，将作品 id 直接写到数据库的 works 中，
+        # 其他的参数先空着就行
         @self.blueprint.route('/add_work', methods=['POST'])
         def add_work():
-            """添加作品到下载队列"""
+            """添加作品到下载队列。
+
+            Returns:
+                JSON：success、work_number 与 website；作品已存在或缺作品ID
+                时 400，异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -163,10 +179,15 @@ class DownloadApi:
                     'error': f'添加作品失败: {str(e)}'
                 }), 500
 
-        #停止下载某部作品，通过将state改为stopped
+        # 停止下载某部作品，通过将 state 改为 stopped
         @self.blueprint.route('/stop_work', methods=['POST'])
         def stop_work():
-            """停止下载指定作品"""
+            """停止下载指定作品。
+
+            Returns:
+                JSON：success、work_number、website 与 state（stopped）；
+                作品不存在 404，异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -220,10 +241,15 @@ class DownloadApi:
                     'error': f'停止作品下载失败: {str(e)}'
                 }), 500
 
-        #把作品重新排回下载队列（failed/stopped/done 均可重排，重排后状态为 inQueue）
+        # 把作品重新排回下载队列（failed/stopped/done 均可重排，重排后状态为 inQueue）
         @self.blueprint.route('/requeue_work', methods=['POST'])
         def requeue_work():
-            """重新入队指定作品"""
+            """重新入队指定作品。
+
+            Returns:
+                JSON：success、work_number、website 与 state（inQueue）；
+                作品不存在 404，异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()

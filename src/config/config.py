@@ -32,11 +32,11 @@ _UNSET = object()
 class ConfigManager:
     """配置管理器：加载、热重载、环境变量覆盖与持久化。
 
-    数据结构：config_dict 是“配置段名 → 键值字典”的两层字典，每个段对应
+    数据结构：config_dict 是"配置段名 → 键值字典"的两层字典，每个段对应
     confs/ 下的一个 yaml/json 文件。
 
     线程模型：所有读写经 _config_lock（RLock）串行；热重载采用
-    “局部构建完整副本 → 锁内整体换入”，读方不会看到空窗。
+    "局部构建完整副本 → 锁内整体换入"，读方不会看到空窗。
 
     Attributes:
         config_dict: 配置段名 → 键值字典 的两层字典。
@@ -65,11 +65,14 @@ class ConfigManager:
 
     @classmethod
     def load_all_configs(cls):
-        """加载 config_path 中的所有配置文件（优先 YAML，其次 JSON）
+        """加载 config_path 中的所有配置文件（优先 YAML，其次 JSON）。
 
         先在局部构建完整副本，最后整体替换 config_dict：
         热重载期间读方（get/调度循环）不会看到清空后的空窗；
         目录缺失等整体失败时旧配置原样保留。
+
+        Raises:
+            FileNotFoundError: 配置目录不存在。
         """
         loaded = {}
         if os.path.exists(config_path()):
@@ -119,7 +122,7 @@ class ConfigManager:
     
     @classmethod
     def start_daemon(cls):
-        """启动守护线程，定期重载配置"""
+        """启动守护线程，定期重载配置。"""
         with cls._config_lock:
             if cls._daemon_thread is not None and cls._daemon_thread.is_alive():
                 return
@@ -131,7 +134,7 @@ class ConfigManager:
     
     @classmethod
     def stop_daemon(cls):
-        """停止守护线程"""
+        """停止守护线程。"""
         with cls._config_lock:
             if cls._daemon_thread is None:
                 return
@@ -172,8 +175,21 @@ class ConfigManager:
     
     @classmethod
     def get(cls, dict_name, key):
-        """获取配置值；字典或键不存在抛 GetUnknownKey，值为 None 合法；
-        字符串值中的 ${BASE_PATH} 占位符会替换为实际工作目录"""
+        """获取配置值。
+
+        字典或键不存在时抛 GetUnknownKey；值为 None 合法；字符串值中的
+        ${BASE_PATH} 占位符会替换为实际工作目录。
+
+        Args:
+            dict_name: 配置段名。
+            key: 配置键。
+
+        Returns:
+            配置值（任意类型）。
+
+        Raises:
+            GetUnknownKey: 配置段或配置键不存在。
+        """
         with cls._config_lock:
             config_data = cls.config_dict.get(dict_name)
             if config_data is None:
@@ -270,8 +286,10 @@ class ConfigManager:
 
     @classmethod
     def _apply_env_overrides(cls):
-        """环境变量覆盖配置：仅内存生效，不写回配置文件；
-        load_all_configs 每次重载文件后重新应用，保证覆盖在热重载后依然有效"""
+        """环境变量覆盖配置：仅内存生效，不写回配置文件。
+
+        load_all_configs 每次重载文件后重新应用，保证覆盖在热重载后依然有效。
+        """
         for dict_name, config_data in cls.config_dict.items():
             for key in list(config_data.keys()):
                 # 构建环境变量名：DICT_NAME_KEY (大写，下划线分隔)
@@ -294,7 +312,14 @@ class ConfigManager:
     
     @classmethod
     def _save_config(cls, dict_name):
-        """将指定配置字典保存到文件"""
+        """将指定配置字典保存到文件。
+
+        Args:
+            dict_name: 配置段名。
+
+        Raises:
+            RuntimeError: 目标为 YAML 文件但缺少 PyYAML 依赖。
+        """
         with cls._config_lock:
             if dict_name not in cls.config_dict:
                 logger.error(f"配置字典不存在，无法保存: {dict_name}")

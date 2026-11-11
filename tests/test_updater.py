@@ -29,6 +29,7 @@ def db(tmp_path):
 
 @pytest.fixture(autouse=True)
 def clean_config():
+    """预置 update 配置段，测试后还原全局配置字典。"""
     saved = dict(ConfigManager.config_dict)
     ConfigManager.config_dict.clear()
     ConfigManager.config_dict["update"] = {
@@ -42,6 +43,7 @@ def clean_config():
 
 
 def test_site_setting_overrides_and_falls_back():
+    """测试 site_setting 两层回落：站点覆盖优先，未配置键回落 default。"""
     # 只加站点段，保留 fixture 预置的 site.default
     ConfigManager.config_dict["update"]["site"]["pixiv"] = {"update_thread": 3, "update_interval": -1}
     assert Updater.site_setting("pixiv", "update_thread") == 3       # 站点覆盖
@@ -50,6 +52,7 @@ def test_site_setting_overrides_and_falls_back():
 
 
 def test_pending_positions_per_site(db):
+    """测试待更新位点按站点查询且过滤 stopped 状态。"""
     with DatabaseManager.get_db_session() as s:
         s.add_all([
             PublishPos(authorId="p1", website="pixiv", state="inQueue"),
@@ -64,6 +67,7 @@ def test_pending_positions_per_site(db):
 
 
 def test_update_position_inserts_and_stops_incrementally(db):
+    """测试首次同步入库 works/upload，重复调用增量停止且幂等。"""
     with DatabaseManager.get_db_session() as s:
         s.add(PublishPos(authorId="p1", website="pixiv", state="inQueue"))
 
@@ -190,6 +194,7 @@ def _wait_status(u, key, timeout=5):
 
 
 def test_update_position_now_runs_and_records(db, tmp_path):
+    """测试立即更新异步执行、状态记录与 downloadInfo（作者+作品号）写入。"""
     from src.service.dispatcher import ScriptDispatcher
     from src.utils.database.models import Upload, Works
 
@@ -227,6 +232,7 @@ class NowUpdater:
 
 
 def test_update_position_now_validations(db):
+    """测试立即更新对不存在与已停止位点返回对应原因。"""
     with DatabaseManager.get_db_session() as s:
         s.add(PublishPos(authorId="b", website="pixiv", state="stopped"))
 

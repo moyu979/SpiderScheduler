@@ -9,6 +9,7 @@ from src.utils.database.models import Base
 
 
 def test_migrations_stamp_version_on_fresh_db(tmp_path):
+    """测试新库迁移盖章到 HEAD 版本，且重复执行保持幂等。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
     db_module.DatabaseManager.engine = engine
     try:

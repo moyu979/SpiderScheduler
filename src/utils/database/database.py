@@ -114,8 +114,18 @@ class DatabaseManager:
 
     @classmethod
     def _build_connect_args(cls, sys_conf: dict, db_url: str) -> dict:
-        """connect_args 来自配置（system.yaml 的 database_connect_args）；
-        SQLite 默认关闭同线程检查以支持多线程会话"""
+        """构建 create_engine 的 connect_args。
+
+        来自 system.yaml 的 database_connect_args；SQLite 默认关闭同线程
+        检查以支持多线程会话。
+
+        Args:
+            sys_conf: system 配置段字典。
+            db_url: 数据库连接串。
+
+        Returns:
+            dict: 传给 create_engine 的连接参数。
+        """
         connect_args = dict(sys_conf.get('database_connect_args') or {})
         if db_url.startswith('sqlite'):
             connect_args.setdefault('check_same_thread', False)
@@ -123,10 +133,13 @@ class DatabaseManager:
 
     @classmethod
     def _run_migrations(cls, is_new: bool):
-        """
-        schema 版本表 + 顺序迁移。
+        """检查 schema 版本表并按序补跑迁移。
+
         迁移文件放在 migrations/ 下，命名 000N_说明.py，提供 apply(engine)；
         已记录版本之后的文件按序补跑，每跑完一个推进版本号。
+
+        Args:
+            is_new: 是否为全新数据库（本地 sqlite 文件此前不存在）。
         """
         migrations_dir = Path(__file__).resolve().parent / "migrations"
 

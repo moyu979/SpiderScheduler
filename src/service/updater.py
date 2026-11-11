@@ -46,6 +46,12 @@ class Updater:
     Attributes:
         dispatcher: 按 website 路由到 UpdateUser 脚本类的分发器。
         _stop_event: 停止信号；所有等待均通过它实现，保证可被 stop() 立即唤醒。
+        _runners: website → 站点调度线程的注册表。
+        _pools: website → 站点线程池的注册表（与 _runners 同生命周期）。
+        _manual_executor: “立即更新”专用线程池（懒加载，与站点调度池解耦）。
+        _manual_lock: 保护 _manual_running 的锁。
+        _manual_running: 在途“立即更新”的 (website, authorId) 集合。
+        _manual_status: “立即更新”结果状态表（键为 "website|authorId"）。
 
     状态约定：
         - publish_pos.state: inQueue / stopped，stopped 的位点不参与更新；
@@ -61,6 +67,7 @@ class Updater:
     PAGE_INTERVAL_DEFAULT = 5
 
     def __init__(self):
+        """初始化空的注册表、停止信号与“立即更新”登记结构。"""
         self.dispatcher = None
         self._stop_event = Event()
         self._runners = {}   # website -> 调度线程
@@ -79,13 +86,27 @@ class Updater:
             website: 站点名。
             key: 配置键。
             default: 全链未配置时的代码级兜底值（缺省则抛 GetUnknownKey）。
+
+        Returns:
+            解析后的配置值。
         """
         return ConfigManager.site_setting('update', website, key, default)
 
     @classmethod
     def _seconds(cls, website, key, default):
-        """秒数型站点配置解析：-1 保留（表示不限/不等待），其余最小 1 秒；
-        键缺失或非数值时用内置默认值，避免字符串配置在算术处抛 TypeError。"""
+        """解析秒数型站点配置。
+
+        -1 保留（表示不限/不等待），其余最小 1 秒；键缺失或非数值时用内置
+        默认值，避免字符串配置在算术处抛 TypeError。
+
+        Args:
+            website: 站点名。
+            key: 配置键。
+            default: 配置缺失或非法时使用的内置默认值。
+
+        Returns:
+            int: 解析后的秒数（-1 或最小 1）。
+        """
         try:
             value = int(cls.site_setting(website, key))
         except (GetUnknownKey, TypeError, ValueError):
@@ -147,7 +168,11 @@ class Updater:
         return {row[0] for row in rows}
 
     def _start_site_runner(self, website):
-        """为站点启动调度线程（含站点专属线程池）。"""
+        """为站点启动调度线程（含站点专属线程池）。
+
+        Args:
+            website: 站点名。
+        """
         thread = Thread(
             target=lambda: self._site_runner(website),
             daemon=True, name=f"UpdateSite-{website}")
@@ -156,7 +181,11 @@ class Updater:
         logger.info(f"站点更新调度线程已启动: {website}")
 
     def _site_runner(self, website):
-        """站点调度线程入口：装配站点专属线程池，退出时清理。"""
+        """站点调度线程入口：装配站点专属线程池，退出时清理注册表。
+
+        Args:
+            website: 站点名。
+        """
         pool = ThreadPool(
             max_workers=self.site_setting(website, 'update_thread', 1),
             name=f"Update-{website}",
@@ -179,6 +208,10 @@ class Updater:
         commit_interval 错峰）→ 等待本轮收尾并汇总 → 按 update_interval（±10%
         抖动，-1 表示持续更新）休眠。站点级/全局开关关闭时退出本线程，
         恢复后由守护线程重新拉起。
+
+        Args:
+            website: 站点名。
+            pool: 本站点专属的更新线程池。
         """
         while not self._stop_event.is_set():
             # 站点级/全局开关关闭 → 退出本站调度线程，恢复后由守护线程重新拉起

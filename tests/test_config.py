@@ -18,12 +18,14 @@ def clean_config_state():
 
 
 def test_get_returns_none_valued_key():
+    """测试值为 None 的键能正常读出，且不影响同字典其他键。"""
     ConfigManager.config_dict["demo"] = {"maybe": None, "v": 3}
     assert ConfigManager.get("demo", "maybe") is None
     assert ConfigManager.get("demo", "v") == 3
 
 
 def test_get_unknown_dict_message_names_the_dict():
+    """测试请求不存在的字典时报错指名该字典，而非遍历到的最后一个。"""
     ConfigManager.config_dict["a"] = {"k": 1}
     ConfigManager.config_dict["zzz"] = {"k": 2}
     with pytest.raises(GetUnknownKey) as e:
@@ -33,6 +35,7 @@ def test_get_unknown_dict_message_names_the_dict():
 
 
 def test_get_unknown_key_message_names_the_key():
+    """测试字典内键不存在时错误信息同时指名字典名与键名。"""
     ConfigManager.config_dict["a"] = {"k1": 1, "k2": 2}
     with pytest.raises(GetUnknownKey) as e:
         ConfigManager.get("a", "nope")
@@ -41,11 +44,13 @@ def test_get_unknown_key_message_names_the_key():
 
 
 def test_base_path_placeholder_replaced():
+    """测试配置值中的 ${BASE_PATH} 占位符被替换为当前 base_path。"""
     ConfigManager.config_dict["demo"] = {"p": "./${BASE_PATH}/datas"}
     assert ConfigManager.get("demo", "p") == f"./{ConfigManager.base_path}/datas"
 
 
 def test_env_override_memory_only(monkeypatch, tmp_path):
+    """测试环境变量覆盖只在内存生效，不落盘改写任何配置文件。"""
     # base_path 指到空目录，验证环境变量覆盖不会写任何文件
     monkeypatch.setattr(ConfigManager, "base_path", str(tmp_path))
     ConfigManager.config_dict["update"] = {"do_update": False}
@@ -58,6 +63,7 @@ def test_env_override_memory_only(monkeypatch, tmp_path):
 
 
 def test_reload_reapplies_env_override(monkeypatch, tmp_path):
+    """测试热重载从文件加载后，环境变量覆盖依然生效。"""
     confs = tmp_path / "confs"
     confs.mkdir()
     (confs / "update.yaml").write_text("do_update: false\n", encoding="utf-8")
@@ -96,6 +102,7 @@ def test_load_builds_copy_then_swaps(monkeypatch, tmp_path):
 
 
 def test_replace_section_validates_swaps_and_saves(monkeypatch, tmp_path):
+    """测试 replace_section 换入内存并写盘，且对未知段与非映射输入报错。"""
     confs = tmp_path / "confs"
     confs.mkdir()
     (confs / "demo.yaml").write_text("k: old\n", encoding="utf-8")

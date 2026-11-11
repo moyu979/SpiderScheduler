@@ -67,6 +67,8 @@ publish_pos（发布位点）       works                          upload
   `inQueue（或 NULL，兼容旧数据） → downloading → done / failed`；
   `stopped` 可随时由 `stop_work` API 置入：调度跳过、完成回调不覆盖。
   下载中断残留的 `downloading` 会在下一轮开始时自动重置回 `inQueue`。
+  站点暂无可用下载脚本（`ScriptRouteError`）时不标 `failed`，置 `noDownloader`
+  挂起；下载脚本上传/重载或服务启动后，站点已就位脚本的挂起作品自动刷回 `inQueue`。
 - 源站自身的作品状态不入 `state`，由更新器存进 `otherInfo` 的 `siteState` 键（JSON）。
 - `works.downloadInfo`：该作品的统一下载参数（JSON 文本）。`add_work` API 可直接传 JSON 对象入库；
   下载时反序列化为 dict，作为 `download_info` 参数交给脚本。站点差异尽量收拢在数据里而不是代码分支。
@@ -93,7 +95,8 @@ publish_pos（发布位点）       works                          upload
   一个文件可以放多个站点的类，类名不限。
 - 文件内**没有任何类声明 website** 时，视为传统单站点脚本：回退到约定的类名
   （`DownloadWork` / `UpdateUser`），对任意 website 生效——旧脚本无需改动即可继续工作。
-- 路由失败（无匹配且无兜底）抛 `ScriptRouteError`，错误信息列出可用站点。
+- 路由失败（无匹配且无兜底）抛 `ScriptRouteError`，错误信息列出可用站点；下载任务据此
+  置 `noDownloader` 挂起（不标 `failed`），上传/重载下载脚本成功后自动刷回 `inQueue`。
 
 ### 更新脚本（每用户一个实例，迭代器协议）
 
@@ -148,7 +151,8 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 启动独立调度线程——各自独立的线程池（`download_thread`）、轮间隔（`download_interval`，-1
 持续下载）、数量限制（`once_download_number`）、缓存与路径。站点循环内：回收中断残留 →
 按优先级认领本站任务（`state ∈ {inQueue, NULL}`）→ 认领即置 `downloading`，交线程池执行 →
-成功置 `done` 记录 `downloadDate`，异常置 `failed`（不覆盖 `stopped`）→ 轮末等任务收尾。
+成功置 `done` 记录 `downloadDate`，异常置 `failed`（不覆盖 `stopped`），站点无下载脚本置
+`noDownloader` 挂起 → 轮末等任务收尾。
 站点级配置写在 `download.yaml` 的 `site` 结构（解析顺序 site.<website> > site.default > 代码内置兜底），支持运行中热更新
 （线程数除外，改动后重启进程或站点线程重建时生效）；全局 `do_download` 是总开关，
 站点级 `do_download: false` 可单独关站，开关恢复后守护线程自动重新拉起。
@@ -158,13 +162,14 @@ HH:MM 支持跨天，weekdays: 1=周一..7=周日，month_days 支持负数 -1=�
 一律放行（fail-open）。配合 `once_download_number: -1` 与 `download_interval: -1` 可实现
 窗口内全速突击消耗代理流量。
 
-**下载路径包装**（对脚本屏蔽缓存细节）：脚本只接收一个下载目录 + downloadInfo——
-目录层级由调度器组装为 `<路径根>/<website>/<workNumber>/`（每站点一个目录，
-作品子目录按站点内编号，编号过滤文件系统不安全字符）：`use_cache` 开时脚本拿到
-`cache_path/<website>/<workNumber>/`，返回产物路径后框架拷贝到最终保存路径
-`download_path/<website>/<workNumber>/` 并清理该作品缓存目录（缺产物路径视为失败）；
-`use_cache` 关时脚本直接写最终目录。两种模式脚本无感。路径根可经
-`download.yaml` 的 site 段按站点覆盖。
+**下载路径包装**（脚本拿站点级下载根，作品子目录由脚本自建）：脚本接收站点级
+下载根 `<路径根>/<website>/`（路径根只配到 cache/download 这一层，`<website>`
+由框架按 site 拼）+ downloadInfo，在其下自建作品子目录（建议 workNumber 过滤
+文件系统不安全字符命名），`download_it` 返回产物路径（相对该根或绝对路径均可）。
+交付：`use_cache` 开且 `cache_path` ≠ `download_path` 时，框架按相对层级把产物
+搬到 `download_path/<website>/` 下并清理该作品在缓存侧的残留（缺产物路径、返回
+站点根本身或指向缓存根之外均视为失败）；两层一致或 `use_cache` 关时无需搬运，
+产物原地保留。
 
 两个服务都有 `stop()`：置停止事件（所有 sleep 均为可唤醒的 `Event.wait`）+ 线程池
 `shutdown(wait=True, cancel_futures=True)`，Ctrl+C 时由 main 的信号处理依次调用。

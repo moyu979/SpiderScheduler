@@ -55,6 +55,18 @@ def normalize_cookies(cookies) -> str:
 
 
 class DemoUpdateUser(UpdateUser):
+    """demo 站点更新脚本：可运行的 UpdateUser 行为示例。
+
+    展示三类要点：website 路由声明、get_one_page 翻页与作品字典产出（从新
+    到旧，翻页是否结束以站点的 hasMore 为准）、cookie 三级优先级解析（内存
+    usr["cookies"] > 文件 cookie_manager > 匿名）。demo 站点会把收到的
+    Cookie 回显在响应头，运行日志里可核对 cookie 来源链路。
+
+    Attributes:
+        website: 路由站点名，必须与 PublishPos.website 一致（此处固定 "demo"）。
+        DEMO_BASE: demo 站点入口地址；run_demo.py 会改写本类属性指向本地
+            假站点，真实站点脚本直接写死或用环境变量注入。
+    """
     # 分发器按 website 路由：站点名必须与位点（PublishPos.website）一致
     website = "demo"
 
@@ -63,9 +75,10 @@ class DemoUpdateUser(UpdateUser):
     DEMO_BASE = os.environ.get("DEMO_SITE_URL", "http://127.0.0.1:9377")
 
     def __init__(self, usr: dict, logging):
-        """
+        """初始化 demo 更新器：调用基类后记录位点参数与内存 cookie 入口。
+
         Args:
-            usr (dict): 发布位点信息 {authorId, website, addTime}；
+            usr: 发布位点信息 {authorId, website, addTime}；
                 内存传入方式额外约定 usr["cookies"] 携带 cookie（形态见
                 normalize_cookies）。该键不是框架字段，仅供直接实例化时使用。
             logging: 框架日志对象（SpiderLogger），用法同 logger.info(...)。
@@ -108,7 +121,7 @@ class DemoUpdateUser(UpdateUser):
     # ---------------- 翻页与迭代（框架调用面） ----------------
 
     def get_one_page(self) -> None:
-        """请求一页作品列表（从新到旧），结果放进 self.works。"""
+        """请求一页作品列表（从新到旧），结果放进 self.works 并刷新 _has_more。"""
         header, source = self._resolve_cookies()
         url = f"{self.DEMO_BASE}/author/{self.author_id}/list"
         resp = requests.get(
@@ -131,10 +144,12 @@ class DemoUpdateUser(UpdateUser):
         self._has_more = bool(data.get("hasMore"))
 
     def _log(self, message):
+        """经框架日志对象输出日志；未注入时静默跳过。"""
         if self.log is not None:
             self.log.info(message)
 
     def __iter__(self):
+        """重置翻页与迭代状态（框架对每个位点都重新迭代一次）。"""
         # 重置为初始状态（框架对每个位点都重新迭代一次）
         self.page = 1
         self.works = []
@@ -142,6 +157,14 @@ class DemoUpdateUser(UpdateUser):
         return self
 
     def __next__(self):
+        """迭代协议：产出下一条作品；当前页消费完时按 page_interval 限速翻页。
+
+        Returns:
+            dict: 单条作品字典（至少含 workid）。
+
+        Raises:
+            StopIteration: 翻页后仍无数据或站点告知无更多页时结束迭代。
+        """
         # 当前页消费完则翻下一页；翻页后仍无数据或站点告知无更多页即结束
         if not self.works:
             if not self._has_more:

@@ -17,7 +17,7 @@ main.py ──► src/core/initialization.py (single init: files→config→logg
  (hot reload)   blueprints + web dispatcher          threadPool/dynamic_loader
 ```
 
-Dependencies point downwards only; no reverse imports. ~5400 lines of Python plus a 958-line
+Dependencies point downwards only; no reverse imports. ~5900 lines of Python plus a 959-line
 single-file frontend.
 
 Key decisions and their rationale:
@@ -102,30 +102,28 @@ ScriptDispatcher.load()
 - Dispatch: `dispatcher.get(website)` exact match → wildcard fallback → `ScriptRouteError`
   (lists available sites).
 - `snapshot()` returns the route table for the System tab.
-- Script instances receive injected attributes: `logger` (the SpiderLogger class),
-  `config_manager`, `cookie_manager` (classmethod-style).
+- Script instances receive injected attributes (assigned after construction):
+  `logger` (the SpiderLogger class), `config_manager`, `cookie_manager`
+  (classmethod-style), `tools` (a ScriptTools instance).
 
-### 3.1 DownloadWork Contract
+### 3.1 Contract Summary
 
 ```python
-def __init__(self, work_info: dict, download_path: str, download_info: dict | None)
+# DownloadWork (download scripts)
+def __init__(self, work_info, download_path, download_info=None)
 def download_it(self) -> str | dict   # str=payload path; dict={path, duration?}
+
+# UpdateUser (update scripts)
+def __init__(self, usr, logging)      # usr = {authorId, website, addTime}
+def __iter__ / __next__               # yields work dicts, newest to oldest
 ```
 
-`download_path` is decided by the wrapper (see §5.2) and pre-created. A missing path in the
-return value is treated as a failure in cache mode.
-
-### 3.2 UpdateUser Contract
-
-```python
-def __init__(self, usr: dict, logging)   # usr = {authorId, website, addTime}
-def __iter__ / __next__                  # yields dicts:
-# workid|workNumber (required), upTime, title, kind, state (→ otherInfo.siteState),
-# downloadDate, downloadPriority
-```
-
-An existing `upload` link stops the iteration for that position (incremental sync
-semantics) — **yield works from newest to oldest**.
+The full contracts — injected attributes, the site-level `download_path` root and
+payload delivery rules, `noDownloader` suspension, incremental sync, per-site
+config keys, and the `ScriptTools` / `CookieManager` interfaces — are specified in
+the [Interface Reference](interfaces.en.md). The script templates
+`src/assets/scripts/download_a_work.py` / `update_a_user.py` mirror it in their
+module docstrings and are installed into `scripts/` on deployment.
 
 ## 4. Scheduler Internals
 
@@ -214,7 +212,7 @@ from Flask's `/` route.
 ## 8. Testing
 
 ```bash
-python3 -m pytest tests/          # 124 cases
+python3 -m pytest tests/          # 132 cases
 ```
 
 | File | Covers |
@@ -222,7 +220,7 @@ python3 -m pytest tests/          # 124 cases
 | test_models | composite DEFERRABLE FKs, downloadInfo, relationships |
 | test_dispatcher | routing/fallback/reload safety/requirements |
 | test_config | copy-then-swap atomicity, env overrides, replace_section, ${BASE_PATH} |
-| test_queue | claim ordering/state writes/stopped protection/crash recovery/cache wrapper/per-site isolation |
+| test_queue | claim ordering/state writes/stopped protection/crash recovery/noDownloader suspend & requeue/cache delivery & in-place keep/per-site isolation |
 | test_updater | per-site config resolution, per-site scheduling, newest-first yields, page_interval injection |
 | test_script_tools | log outlet, site URLs, Selenium assembly stubs, dynamic registration |
 | test_e2e | embedded fake site + real scheduling end-to-end |

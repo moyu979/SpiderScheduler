@@ -1,4 +1,4 @@
-"""0002：user 表更名为 publish_pos（发布位点），userId 列统一为 authorId
+"""0002：user 表更名为 publish_pos（发布位点），userId 列统一为 authorId。
 
 涉及：user -> publish_pos、publish_pos.userId -> authorId、upload.userId -> authorId
 （SQLite 的 RENAME 会同步更新 upload 里指向父表的外键定义）。
@@ -11,10 +11,12 @@ from sqlalchemy import text
 
 
 def _columns(conn, table: str) -> set:
+    """查询指定表在 SQLite 中的列名集合。"""
     return {row[1] for row in conn.execute(text(f'PRAGMA table_info("{table}")'))}
 
 
 def _tables(conn) -> set:
+    """查询数据库当前的全部表名集合。"""
     return {row[0] for row in conn.execute(
         text("SELECT name FROM sqlite_master WHERE type='table'"))}
 

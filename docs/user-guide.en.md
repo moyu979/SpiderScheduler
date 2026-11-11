@@ -57,13 +57,15 @@ Backing up = copying this directory; moving hosts = copying this directory.
 ### 2.1 Works
 
 - **Filters**: site dropdown, multi-state checkboxes (inQueue / downloading / done / failed /
-  stopped / unmarked), author (matched via upload links), date range (choose upload-time or
+  stopped / noDownloader / unmarked), author (matched via upload links), date range (choose upload-time or
   download-time), keyword (title / work number), sort and pagination. All conditions combine;
   the list auto-refreshes ~0.3 s after any change.
 - **Stats strip**: one row per site with per-state counts. Click a site name to filter by it;
   click a state chip to toggle that state in the multi-select.
-- **Row actions**: works in `inQueue/downloading/failed` can be **stopped** (state→stopped);
+- **Row actions**: works in `inQueue/downloading/failed/noDownloader` can be **stopped** (state→stopped);
   `stopped/failed/done` works can be **requeued** (state→inQueue).
+  `noDownloader` is a suspended state: works whose site has no download script yet are not
+  marked failed — once you upload a download script for that site they are requeued automatically.
 
 ### 2.2 Positions
 
@@ -216,23 +218,26 @@ class DownloadWork:
 
     def __init__(self, work_info, download_path, download_info=None):
         # work_info: {workNumber, website, title, ...}
-        # download_path: this task's own directory, already created
+        # download_path: site-level download root <root>/<site>/; the script
+        #                builds its own per-work subdirectory under it
         # download_info: downloadInfo deserialized
 
     def download_it(self):
         ...                             # return the payload path (str) or {path, duration}
 ```
 
-Update scripts are iterators yielding works (fields in Dev Guide §3.2). If a site is missing
+Update scripts are iterators yielding works (fields in Interface Reference §4.3). If a site is missing
 from dropdowns, add it via "Add site" on the Cookie tab first (writes back to `websites.yaml`).
 
 ## 5. Download Cache
 
-- `use_cache: true`: the script receives a dedicated cache directory
-  `cache_path/<site>/<work>/`; after `download_it()` returns the payload path, the framework
-  **copies** it to the final location `download_path/<site>/<work>/` and removes the per-work
-  cache directory.
-- `use_cache: false`: the script writes the final directory directly, no staging.
+- `use_cache: true`: the script receives the site-level download root
+  `cache_path/<site>/` and builds its own per-work subdirectory; after `download_it()`
+  returns the payload path (relative to that root or absolute), the framework **moves** it
+  to the final location `download_path/<site>/` by relative layout and cleans the work's
+  leftovers on the cache side.
+- `use_cache: false`, or `cache_path` equal to `download_path`: treated as no staging
+  layer — payloads stay where the script wrote them, nothing is moved.
 - Script code is identical in both modes; toggling the switch requires no script changes.
 
 ## 6. REST API Reference
@@ -265,6 +270,8 @@ Responses are `{"success": true/false, ...}`; entity identity is always `(id, we
 - **Site dropdown empty**: add the site via "Add site" on the Cookie tab first (writes back
   to `websites.yaml`).
 - **Works stuck at failed**: check the log for the script exception, fix it, then requeue.
+- **Works shown as "noDownloader"**: the site has no download script yet — upload one for that
+  site on the System tab and the works are requeued automatically (or click "Reload scripts").
 - **Login page renders oddly**: strict CSP or JS-built absolute URLs are known proxy
   limitations.
 - **Database locked**: WAL + busy_timeout are enabled; avoid opening the same work directory

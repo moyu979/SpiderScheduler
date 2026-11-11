@@ -15,19 +15,29 @@ from datetime import datetime
 
 
 class UpdateApi:
-    """发布位点管理端点：添加、停止/恢复追踪与更新配置更新。"""
-    
+    """发布位点管理端点：添加、停止/恢复追踪与更新配置更新。
+
+    Attributes:
+        blueprint: 挂载全部路由的 Flask 蓝图。
+    """
+
     def __init__(self):
+        """创建蓝图并注册全部更新管理路由。"""
         self.blueprint = Blueprint('update_api', __name__, url_prefix='/api/update')
         self._register_routes()
-    
+
     def _register_routes(self):
-        """注册更新管理相关路由"""
+        """注册更新管理相关路由。"""
         
-        #更新更新配置
+        # 更新更新配置
         @self.blueprint.route('/config', methods=['PUT'])
         def update_update_config():
-            """更新更新配置"""
+            """更新更新配置。
+
+            Returns:
+                JSON：success 与 updated_keys；部分键失败时 400 附 errors，
+                请求体为空或 update 段不存在 400，整体异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -87,10 +97,15 @@ class UpdateApi:
                     'error': f'更新配置失败: {str(e)}'
                 }), 500
 
-        #增加一个发布位点，不知道的列先空着就行
+        # 增加一个发布位点，不知道的列先空着就行
         @self.blueprint.route('/add_pos', methods=['POST'])
         def add_pos():
-            """添加发布位点"""
+            """添加发布位点。
+
+            Returns:
+                JSON：success、author_id 与 website；位点已存在或缺作者ID
+                时 400，异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -153,10 +168,15 @@ class UpdateApi:
                     'error': f'添加位点失败: {str(e)}'
                 }), 500
 
-        #停止对某个发布位点的追踪，通过将state设置为stopped
+        # 停止对某个发布位点的追踪，通过将 state 设置为 stopped
         @self.blueprint.route('/stop_pos', methods=['POST'])
         def stop_pos():
-            """停止追踪指定发布位点"""
+            """停止追踪指定发布位点。
+
+            Returns:
+                JSON：success、author_id、website 与 state（stopped）；
+                位点不存在 404，异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -210,10 +230,15 @@ class UpdateApi:
                     'error': f'停止追踪位点失败: {str(e)}'
                 }), 500
 
-        #恢复对某个发布位点的追踪（stopped -> inQueue）
+        # 恢复对某个发布位点的追踪（stopped -> inQueue）
         @self.blueprint.route('/resume_pos', methods=['POST'])
         def resume_pos():
-            """恢复追踪指定发布位点"""
+            """恢复追踪指定发布位点。
+
+            Returns:
+                JSON：success、author_id、website 与 state（inQueue）；
+                位点不存在 404，异常 500。
+            """
             try:
                 # 获取请求数据
                 data = request.get_json()
@@ -267,10 +292,15 @@ class UpdateApi:
                     'error': f'恢复追踪位点失败: {str(e)}'
                 }), 500
 
-        #立即更新单个位点（绕过轮次调度，后台执行）
+        # 立即更新单个位点（绕过轮次调度，后台执行）
         @self.blueprint.route('/update_now', methods=['POST'])
         def update_now():
-            """立即更新指定位点（后台执行，立即返回是否受理）"""
+            """立即更新指定位点（后台执行，立即返回是否受理）。
+
+            Returns:
+                JSON：success 与受理结果（started/author_id/website 或
+                reason）；位点不存在 404、已停止 400，异常 500。
+            """
             try:
                 data = request.get_json()
                 if not data:
@@ -304,8 +334,12 @@ class UpdateApi:
                     'error': f'立即更新失败: {str(e)}'
                 }), 500
 
-        #“立即更新”状态查询（供前端轮询）
+        # “立即更新”状态查询（供前端轮询）
         @self.blueprint.route('/update_now/status')
         def update_now_status():
-            """返回全部立即更新任务的状态快照"""
+            """返回全部立即更新任务的状态快照。
+
+            Returns:
+                JSON：success 与 statuses（全部立即更新任务的快照）。
+            """
             return jsonify({'success': True, 'statuses': updater.manual_status()})

@@ -46,9 +46,25 @@ received_cookies = {}
 
 
 class DemoSiteHandler(BaseHTTPRequestHandler):
-    """最小假站点：作者作品列表 + 作品数据，把收到的 Cookie 原样回显。"""
+    """最小假站点：作者作品列表 + 作品数据，把收到的 Cookie 原样回显。
+
+    端点：
+    - /author/<authorId>/list?page=N：返回该作者一页作品列表
+      （{"works": [...], "hasMore": ...}，共 2 页）；
+    - /works/<workNumber>：返回作品数据（{"work": ..., "cookieSeen": ...}）；
+    - 其余路径返回 404。
+    每个响应均带 X-Received-Cookie 头回显实际收到的 Cookie，供场景断言与
+    脚本日志核对。
+    """
 
     def _send(self, payload, status=200, extra_headers=None):
+        """以 JSON 响应当前请求，可附加额外响应头。
+
+        Args:
+            payload: 序列化为 JSON 的响应正文对象。
+            status: HTTP 状态码，默认 200。
+            extra_headers: 附加响应头（如 X-Received-Cookie 回显），可省略。
+        """
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -59,6 +75,7 @@ class DemoSiteHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        """记录并回显 Cookie，然后按路径分流到作者列表、作品数据或 404。"""
         cookie = self.headers.get("Cookie", "")
         received_cookies[self.path] = cookie
         echo = {"X-Received-Cookie": cookie or "(none)"}
@@ -136,7 +153,15 @@ def run_downloader(work_info, download_root, download_info=None, cookie_manager=
 
 
 def cookie_reached(prefix, marker):
-    """demo 站点是否在 prefix 开头的路径上收到过含 marker 的 Cookie 头"""
+    """demo 站点是否在 prefix 开头的路径上收到过含 marker 的 Cookie 头。
+
+    Args:
+        prefix: 路径前缀，如 "/author/alice/list"。
+        marker: 应出现在 Cookie 头中的片段，如 "sid=demo-secret-123"。
+
+    Returns:
+        bool: 收到过返回 True，否则 False。
+    """
     return any(marker in cookie for path, cookie in received_cookies.items()
                if path.startswith(prefix))
 
@@ -239,6 +264,7 @@ SCENARIOS = [
 
 
 def main():
+    """启动本地 demo 站点，依次运行三个场景并输出 PASS/FAIL 汇总。"""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",

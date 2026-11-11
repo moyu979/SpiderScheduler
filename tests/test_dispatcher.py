@@ -18,6 +18,7 @@ def _write(tmp_path, content, name="script.py"):
 
 
 def test_routes_by_website_attribute(tmp_path):
+    """测试按 website 属性路由脚本类，支持单站点与站点列表。"""
     path = _write(tmp_path, '''
 class PixivWork:
     website = "pixiv"
@@ -33,6 +34,7 @@ class DanbooruWork:
 
 
 def test_fallback_without_website(tmp_path):
+    """测试无 website 声明的兜底类对任何站点都生效。"""
     path = _write(tmp_path, '''
 class DownloadWork:
     pass
@@ -43,6 +45,7 @@ class DownloadWork:
 
 
 def test_unknown_website_error_lists_available(tmp_path):
+    """测试未知站点报 ScriptRouteError 且错误信息列出可用站点。"""
     path = _write(tmp_path, '''
 class A:
     website = "pixiv"
@@ -55,12 +58,14 @@ class A:
 
 
 def test_missing_fallback_class_raises(tmp_path):
+    """测试脚本中兜底类缺失时初始化抛 AttributeError。"""
     path = _write(tmp_path, "X = 1")
     with pytest.raises(AttributeError):
         ScriptDispatcher(path, fallback_class_name="DownloadWork")
 
 
 def test_failed_reload_preserves_old_routes(tmp_path):
+    """测试重载失败（语法错误或缺兜底类）时旧路由原样保留。"""
     path = _write(tmp_path, '''
 class PixivWork:
     website = "pixiv"
@@ -86,6 +91,7 @@ class PixivWork:
 
 
 def test_reload_switches_routes_on_success(tmp_path):
+    """测试重载成功后路由表切换到新脚本内容。"""
     path = _write(tmp_path, '''
 class DownloadWork:
     pass
@@ -105,6 +111,7 @@ class DanbooruWork:
 # ---------- 脚本依赖自动安装 ----------
 
 def test_parse_requirements_extracts_header_lines():
+    """测试提取脚本头部 requirements 声明，忽略 docstring 内的伪声明。"""
     text = (
         "# requirements: requests>=2.31, beautifulsoup4\n"
         "# requirements: lxml\n"
@@ -116,6 +123,7 @@ def test_parse_requirements_extracts_header_lines():
 
 
 def test_satisfied_checks_installed_and_version():
+    """测试依赖满足判断：已安装、版本约束满足与不满足、未安装。"""
     assert _satisfied("flask") is True            # 环境里已安装
     assert _satisfied("flask>=2.0") is True
     assert _satisfied("flask<1.0") is False       # 版本约束不满足
@@ -123,6 +131,7 @@ def test_satisfied_checks_installed_and_version():
 
 
 def test_ensure_requirements_skips_pip_when_satisfied(tmp_path, monkeypatch):
+    """测试依赖全部满足时不触发 pip 安装。"""
     script = tmp_path / "s.py"
     script.write_text("# requirements: flask\nclass DownloadWork:\n    pass\n", encoding="utf-8")
 
@@ -134,6 +143,7 @@ def test_ensure_requirements_skips_pip_when_satisfied(tmp_path, monkeypatch):
 
 
 def test_ensure_requirements_installs_missing(tmp_path, monkeypatch):
+    """测试只有缺失依赖进入 pip install，已满足的不重复安装。"""
     calls = []
     monkeypatch.setattr(
         "src.service.dispatcher.subprocess.run",
@@ -151,6 +161,7 @@ def test_ensure_requirements_installs_missing(tmp_path, monkeypatch):
 
 
 def test_dispatcher_load_ensures_requirements(tmp_path, monkeypatch):
+    """测试分发器加载脚本前先执行依赖确保流程。"""
     called = []
     monkeypatch.setattr("src.service.dispatcher.ensure_requirements", lambda path: called.append(path))
     path = tmp_path / "script.py"

@@ -21,9 +21,13 @@ class ConfigApi:
 
     提供配置段列表、单段 YAML 读写与整体重载。不允许通过 API 创建不存在的
     配置段；写入即持久化到文件并在内存立即生效。
+
+    Attributes:
+        blueprint: 挂载全部路由的 Flask 蓝图。
     """
 
     def __init__(self):
+        """创建蓝图并注册全部配置管理路由。"""
         self.blueprint = Blueprint('system_config_api', __name__, url_prefix='/api/system')
         self._register_routes()
 
@@ -32,14 +36,22 @@ class ConfigApi:
 
         @self.blueprint.route('/config')
         def config_sections():
-            """列出全部已加载的配置段名。"""
+            """列出全部已加载的配置段名。
+
+            Returns:
+                JSON：success 与 sections（排序后的配置段名列表）。
+            """
             with ConfigManager._config_lock:
                 names = sorted(ConfigManager.config_dict.keys())
             return jsonify({'success': True, 'sections': names})
 
         @self.blueprint.route('/config/<name>/raw')
         def config_section_raw(name):
-            """以 YAML 文本读取单个配置段。"""
+            """以 YAML 文本读取单个配置段。
+
+            Returns:
+                JSON：success、name 与 content（YAML 文本）；段不存在时 404。
+            """
             with ConfigManager._config_lock:
                 data = ConfigManager.config_dict.get(name)
                 if data is None:
@@ -50,7 +62,12 @@ class ConfigApi:
 
         @self.blueprint.route('/config/<name>/raw', methods=['PUT'])
         def save_section_raw(name):
-            """以 YAML 文本整体替换单个配置段（写盘 + 内存即时生效）。"""
+            """以 YAML 文本整体替换单个配置段（写盘 + 内存即时生效）。
+
+            Returns:
+                JSON：success 与 name；请求体缺 content 或 YAML 解析失败 400、
+                段不存在 404、保存异常 500。
+            """
             body = request.get_json(silent=True) or {}
             if 'content' not in body:
                 return _err('请求体需包含 content 字段（YAML 文本）')
@@ -72,7 +89,11 @@ class ConfigApi:
 
         @self.blueprint.route('/config/reload', methods=['POST'])
         def reload_config():
-            """从配置文件整体重载（等效等待一次热重载周期）。"""
+            """从配置文件整体重载（等效等待一次热重载周期）。
+
+            Returns:
+                JSON：success；重载异常时 500。
+            """
             try:
                 ConfigManager.load_all_configs()
                 return jsonify({'success': True})

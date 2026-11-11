@@ -1,5 +1,4 @@
-"""
-登录代理 API：cookie 不存在时，把目标站登录页原样转发给前端让用户手动登录
+"""登录代理 API：cookie 不存在时，把目标站登录页原样转发给前端让用户手动登录。
 
 工作方式（经典登录代理）：
 - GET  /api/cookie/<website>/login_page 返回包装页：顶栏（完成/取消）+ iframe；
@@ -40,7 +39,17 @@ _SESSIONS_LOCK = Lock()
 
 
 def _site_url(website: str) -> str:
-    """从 websites.yaml 取站点入口地址"""
+    """从 websites.yaml 取站点入口地址。
+
+    Args:
+        website: 站点名。
+
+    Returns:
+        str: 去掉尾部斜杠后的入口地址。
+
+    Raises:
+        KeyError: 该站点未配置入口地址。
+    """
     sites = config_manager.config_dict.get('websites') or {}
     url = str(sites.get(website) or '').strip()
     if not url:
@@ -50,7 +59,14 @@ def _site_url(website: str) -> str:
 
 
 def _session(website: str) -> requests.Session:
-    """取（或创建）该站点的登录会话；已有 cookie 文件时先载入，支持"重登刷新" """
+    """取（或创建）该站点的登录会话；已有 cookie 文件时先载入，支持"重登刷新"。
+
+    Args:
+        website: 站点名。
+
+    Returns:
+        requests.Session: 该站点进程内共享的登录会话。
+    """
     with _SESSIONS_LOCK:
         session = _SESSIONS.get(website)
         if session is None:
@@ -67,10 +83,18 @@ def _session(website: str) -> requests.Session:
 
 
 def _rewrite_html(website: str, origin: str, body: bytes) -> bytes:
-    """把 HTML 里的目标站地址改写到代理路径，注入 <base> 处理剩余相对路径
+    """把 HTML 里的目标站地址改写到代理路径，注入 <base> 处理剩余相对路径。
 
     先把绝对/协议相对地址替换为占位符，避免根相对改写把它们再包一层；
     最后统一把占位符还原为代理前缀。
+
+    Args:
+        website: 站点名（决定代理前缀）。
+        origin: 目标站入口地址。
+        body: 目标站返回的原始 HTML 字节。
+
+    Returns:
+        bytes: 改写后的 HTML 字节。
     """
     proxy = f"/api/cookie/{website}/proxy"
     marker = "\x00PROXY\x00"
@@ -86,7 +110,15 @@ def _rewrite_html(website: str, origin: str, body: bytes) -> bytes:
 
 
 def _login_page(website: str, origin: str) -> str:
-    """包装页：顶栏 + iframe 代理页面"""
+    """生成登录包装页：顶栏 + iframe 代理页面。
+
+    Args:
+        website: 站点名（用于页面文案与保存/取消的 API 路径）。
+        origin: 目标站入口地址（顶栏提示用）。
+
+    Returns:
+        str: 完整包装页 HTML 文本。
+    """
     proxy = f"/api/cookie/{website}/proxy/"
     return f"""<!DOCTYPE html>
 <html lang="zh">
@@ -141,6 +173,7 @@ document.getElementById('cancel').onclick = async () => {{
 
 
 def _err(message, code=400):
+    """统一错误响应：success=False + error=message 的 JSON 与状态码。"""
     return jsonify({'success': False, 'error': message}), code
 
 
@@ -149,17 +182,27 @@ class CookieApi:
 
     代理端点把请求转发到 websites.yaml 中该站点的域名：响应里的 Set-Cookie
     不交给浏览器而是收进服务端会话，HTML 做同源改写——浏览器全程只见同源。
+
+    Attributes:
+        blueprint: 挂载全部路由的 Flask 蓝图。
     """
 
     def __init__(self):
+        """创建蓝图并注册全部 cookie 管理路由。"""
         self.blueprint = Blueprint('cookie_api', __name__, url_prefix='/api/cookie')
         self._register_routes()
 
     def _register_routes(self):
+        """注册全部 cookie 管理路由。"""
 
         @self.blueprint.route('/status')
         def status():
-            """已配置站点与 cookie 存储状态"""
+            """已配置站点与 cookie 存储状态。
+
+            Returns:
+                JSON：success 与 rows（website/domain/hasCookie/cookieCount/
+                updateTime）；查询异常 500。
+            """
             try:
                 sites = config_manager.config_dict.get('websites') or {}
                 saved = {r['website']: r for r in CookieManager.status()}
@@ -181,7 +224,11 @@ class CookieApi:
 
         @self.blueprint.route('/<website>/login_page')
         def login_page(website):
-            """登录包装页：顶栏 + 代理 iframe"""
+            """登录包装页：顶栏 + 代理 iframe。
+
+            Returns:
+                Response：包装页 HTML；站点未配置入口地址时 400 JSON。
+            """
             try:
                 origin = _site_url(website)
             except KeyError as e:
@@ -195,7 +242,12 @@ class CookieApi:
         @self.blueprint.route('/<website>/proxy/<path:path>',
                               methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
         def proxy(website, path):
-            """把请求转发到目标站：捕获 Set-Cookie，HTML 同源改写"""
+            """把请求转发到目标站：捕获 Set-Cookie，HTML 同源改写。
+
+            Returns:
+                Response：目标站响应（HTML 已做同源改写）；站点未配置入口
+                地址 400、目标站请求失败 502。
+            """
             try:
                 origin = _site_url(website)
             except KeyError as e:
@@ -230,7 +282,11 @@ class CookieApi:
 
         @self.blueprint.route('/<website>/save', methods=['POST'])
         def save(website):
-            """把该站点登录会话积累的 cookie 落盘"""
+            """把该站点登录会话积累的 cookie 落盘。
+
+            Returns:
+                JSON：success 与 cookieCount；会话中没有 cookie 时 400。
+            """
             with _SESSIONS_LOCK:  # 与 _session()/cancel() 对 _SESSIONS 的访问保持互斥
                 session = _SESSIONS.get(website)
             if session is None or len(session.cookies) == 0:
@@ -251,13 +307,21 @@ class CookieApi:
 
         @self.blueprint.route('/<website>/cancel', methods=['POST'])
         def cancel(website):
-            """放弃本次登录会话"""
+            """放弃本次登录会话。
+
+            Returns:
+                JSON：success。
+            """
             with _SESSIONS_LOCK:
                 _SESSIONS.pop(website, None)
             return jsonify({'success': True})
 
         @self.blueprint.route('/<website>', methods=['DELETE'])
         def delete_cookie(website):
-            """删除已保存的 cookie 文件"""
+            """删除已保存的 cookie 文件。
+
+            Returns:
+                JSON：success 与 removed（是否实际删除了文件）。
+            """
             removed = CookieManager.delete(website)
             return jsonify({'success': True, 'removed': removed})

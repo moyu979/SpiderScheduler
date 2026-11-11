@@ -12,6 +12,7 @@ from src.utils.database.models import Base, PublishPos, Works, Upload
 
 @pytest.fixture()
 def client(tmp_path):
+    """临时库灌入样例数据并注册 QueryApi 蓝图，返回 test_client。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'q.db'}")
     Base.metadata.create_all(engine)
     DatabaseManager.engine = engine
@@ -49,11 +50,13 @@ def _numbers(data):
 
 
 def test_works_no_filter(client):
+    """测试无筛选时返回全部作品。"""
     data = client.get("/api/query/works").get_json()
     assert data["success"] and data["total"] == 5
 
 
 def test_works_filter_website_and_states(client):
+    """测试按站点与多状态（逗号分隔）筛选作品。"""
     data = client.get("/api/query/works?website=danbooru").get_json()
     assert _numbers(data) == ["w4"]
 
@@ -62,11 +65,13 @@ def test_works_filter_website_and_states(client):
 
 
 def test_works_state_none_matches_legacy_null(client):
+    """测试 state=none 匹配旧数据的 NULL 状态。"""
     data = client.get("/api/query/works?state=none").get_json()
     assert _numbers(data) == ["w5"]
 
 
 def test_works_filter_by_author_via_upload(client):
+    """测试按作者（经 upload 关联）筛选及其与站点/状态的组合。"""
     data = client.get("/api/query/works?author=u1").get_json()
     assert set(_numbers(data)) == {"w1", "w2"}
 
@@ -75,11 +80,13 @@ def test_works_filter_by_author_via_upload(client):
 
 
 def test_works_date_range_on_download_date(client):
+    """测试按 downloadDate 的日期区间筛选。"""
     data = client.get("/api/query/works?date_field=downloadDate&date_from=2026-03-01&date_to=2026-03-31").get_json()
     assert _numbers(data) == ["w2"]
 
 
 def test_works_keyword_matches_title_and_number(client):
+    """测试关键词同时匹配标题与作品号。"""
     data = client.get("/api/query/works?keyword=标题乙").get_json()
     assert _numbers(data) == ["w2"]
     data = client.get("/api/query/works?keyword=w4").get_json()
@@ -87,6 +94,7 @@ def test_works_keyword_matches_title_and_number(client):
 
 
 def test_works_sort_and_pagination(client):
+    """测试排序与 limit/offset 分页。"""
     data = client.get("/api/query/works?sort=downloadPriority&order=desc&limit=2&offset=0").get_json()
     assert data["total"] == 5 and len(data["items"]) == 2
     assert data["items"][0]["downloadPriority"] == 5  # 优先级最高的在前
@@ -96,6 +104,7 @@ def test_works_sort_and_pagination(client):
 
 
 def test_works_parsed_json_fields(client):
+    """测试 downloadInfo 等 JSON 字段解析后随条目返回。"""
     data = client.get("/api/query/works?keyword=w2").get_json()
     item = data["items"][0]
     assert item["downloadInfo"] == {"quality": "original"}
@@ -103,11 +112,13 @@ def test_works_parsed_json_fields(client):
 
 
 def test_works_rejects_unknown_sort_field(client):
+    """测试白名单外的排序字段返回 400。"""
     resp = client.get("/api/query/works?sort=1;drop")
     assert resp.status_code == 400
 
 
 def test_positions_filters_and_work_counts(client):
+    """测试位点筛选（状态/站点/关键词）与作品计数统计。"""
     data = client.get("/api/query/positions").get_json()
     assert data["total"] == 3
     by_id = {i["authorId"]: i for i in data["items"]}
@@ -126,11 +137,13 @@ def test_positions_filters_and_work_counts(client):
 
 
 def test_positions_date_range(client):
+    """测试位点按 addTime 日期区间筛选。"""
     data = client.get("/api/query/positions?date_from=2026-04-01&date_to=2026-04-30").get_json()
     assert [i["authorId"] for i in data["items"]] == ["u3"]
 
 
 def test_stats_groups_by_website_and_state(client):
+    """测试统计端点按站点与状态分组计数。"""
     data = client.get("/api/query/stats").get_json()
     assert data["works"]["pixiv"] == {"inQueue": 1, "done": 1, "failed": 1, "none": 1}
     assert data["works"]["danbooru"] == {"inQueue": 1}

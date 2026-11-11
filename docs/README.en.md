@@ -63,8 +63,9 @@ class DownloadWork:
 ```
 
 A script header may declare `# requirements: <package>`; the framework auto-installs missing
-packages before loading. The full script contract, state machines and configuration are
-documented in the [User Guide](user-guide.en.md) and the [Dev Guide](dev-guide.en.md).
+packages before loading. The full script contracts are specified in the
+[Interface Reference](interfaces.en.md); state machines and configuration live in the
+[User Guide](user-guide.en.md) and the [Dev Guide](dev-guide.en.md).
 
 ## Repository Layout
 
@@ -72,7 +73,7 @@ documented in the [User Guide](user-guide.en.md) and the [Dev Guide](dev-guide.e
 SpiderScheduler/
 ├── main.py            # entry point (--repl CLI, --basepath work directory)
 ├── src/               # schedulers, APIs, frontend, infrastructure
-├── tests/             # pytest suite (124 cases)
+├── tests/             # pytest suite (132 cases)
 ├── docker/            # default work directory (runtime data, not committed)
 ├── docs/              # this documentation
 ├── Dockerfile / docker-compose.yml / .dockerignore
@@ -81,8 +82,10 @@ SpiderScheduler/
 
 ## Documentation
 
+- [Interface Reference](interfaces.en.md): DownloadWork / UpdateUser script contracts,
+  injected attributes, per-site config keys, scheduler service interfaces.
 - [User Guide](user-guide.en.md): running the app, all four tabs, REST API reference,
   configuration, troubleshooting.
-- [Dev Guide](dev-guide.en.md): architecture layers, script contract, state machines,
+- [Dev Guide](dev-guide.en.md): architecture layers, script plugin lifecycle, state machines,
   database & migrations, testing, extension guide.
 - [ARCHITECTURE.md](../ARCHITECTURE.md): architecture design document (kept in sync with code).

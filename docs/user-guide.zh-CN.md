@@ -54,12 +54,14 @@ docker/                          ← BASEPATH
 
 ### 2.1 作品
 
-- **筛选**：站点下拉、状态多选（inQueue / downloading / done / failed / stopped / 未标记）、
+- **筛选**：站点下拉、状态多选（inQueue / downloading / done / failed / stopped / noDownloader / 未标记）、
   作者（authorId，经作品关联反查）、日期区间（可选按"上传时间"或"下载时间"）、
   关键字（标题/作品号模糊匹配）、排序与分页。所有条件可任意组合，修改后约 0.3 秒自动刷新。
 - **统计条**：每个站点一行，展示各状态计数。点击站点名 = 按该站点筛选；点击状态 chip = 加入/移出该状态的多选。
-- **行内操作**：`inQueue/downloading/failed` 的作品可"停止"（state→stopped）；
+- **行内操作**：`inQueue/downloading/failed/noDownloader` 的作品可"停止"（state→stopped）；
   `stopped/failed/done` 的作品可"重新入队"（state→inQueue）。
+  `noDownloader`（无下载器）是挂起状态：站点暂无下载脚本的作品不标失败，上传对应站点的
+  下载脚本后会自动重新入队。
 
 ### 2.2 位点
 
@@ -195,22 +197,24 @@ class DownloadWork:
 
     def __init__(self, work_info, download_path, download_info=None):
         # work_info: {workNumber, website, title, ...}
-        # download_path: 本任务专属目录，框架已创建，把数据写这里
+        # download_path: 站点级下载根 <根>/<站点>/，作品子目录由脚本自建
         # download_info: downloadInfo 反序列化后的 dict
 
     def download_it(self):
         ...                             # 返回产物路径（str）或 {path, duration}
 ```
 
-更新脚本用迭代器产出作品（字段见开发手册 §3.2）。站点下拉里没有的站点，先在 Cookie 页
+更新脚本用迭代器产出作品（字段见[接口文档](interfaces.zh-CN.md) §4.3）。站点下拉里没有的站点，先在 Cookie 页
 "添加站点"填写入口地址（写回 `websites.yaml`）。
 
 ## 5. 下载缓存机制
 
-- `use_cache: true`：脚本拿到的是缓存中的专属目录 `cache_path/<站点>/<作品号>/`；
-  `download_it()` 返回产物路径后，框架把产物**拷贝**到最终路径
-  `download_path/<站点>/<作品号>/`，然后清理该作品缓存目录（站点目录保留）。
-- `use_cache: false`：脚本直接写最终保存目录，无中转。
+- `use_cache: true`：脚本拿到的是缓存中的站点级下载根 `cache_path/<站点>/`，在下面
+  自建作品子目录；`download_it()` 返回产物路径（相对该根或绝对路径）后，框架按相对
+  层级把产物**搬运**到最终路径 `download_path/<站点>/` 下，并清理该作品在缓存侧的
+  残留（站点目录保留）。
+- `use_cache: false`，或 `cache_path` 与 `download_path` 配成同一目录：视为未配独立
+  缓存层，脚本产物原地保留，不做搬运。
 - 两种模式脚本代码完全一致，切换开关不改脚本。
 
 ## 6. REST API 参考
@@ -242,6 +246,8 @@ class DownloadWork:
   "重载脚本"；`download_thread` 例外，需重启进程。
 - **站点下拉是空的**：先在 Cookie 页"添加站点"填写入口地址（写回 `websites.yaml`）。
 - **作品一直是 failed**：查看日志定位脚本异常，修复后"重新入队"。
+- **作品显示"无下载器"**：该站点还没有下载脚本，在系统页上传对应站点的下载脚本后
+  会自动重新入队开始下载（也可上传后点"重载脚本"）。
 - **登录页显示异常**：站点有强 CSP 或 JS 拼绝对 URL 时代理适配不了，属于已知局限。
 - **数据库锁冲突**：框架已启用 WAL + busy_timeout，一般不会出现；避免多个进程同时打开
   同一个工作目录。

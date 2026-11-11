@@ -1,5 +1,5 @@
 """
-按 website 存取登录 cookie
+按 website 存取登录 cookie。
 
 存储位置：BASEPATH/datas/cookies/<website>.json，JSON 数组，每条 cookie 形如
 {name, value, domain, path, expires, secure, ...}——与 Selenium get_cookies() 输出
@@ -18,7 +18,7 @@ from src.utils.logging.logger import SpiderLogger as logger
 
 
 class CookieNotFoundError(Exception):
-    """指定 website 还没有已保存的登录 cookie"""
+    """指定 website 还没有已保存的登录 cookie。"""
 
 
 class CookieManager:
@@ -31,18 +31,33 @@ class CookieManager:
 
     @classmethod
     def _cookie_file(cls, website: str) -> str:
+        """返回指定 website 的 cookie 文件路径。"""
         return os.path.join(cookies_path(), f"{website}.json")
 
     @classmethod
     def exists(cls, website: str) -> bool:
-        """指定 website 是否已有可用的 cookie 文件"""
+        """指定 website 是否已有可用的 cookie 文件。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            bool: cookie 文件存在为 True。
+        """
         return os.path.exists(cls._cookie_file(website))
 
     @classmethod
     def save(cls, website: str, cookies: list) -> int:
-        """覆盖保存指定 website 的 cookie 列表，返回条数。
+        """覆盖保存指定 website 的 cookie 列表。
 
         先写临时文件再原子替换，调度线程并发读取（get/get_header）不会看到半截 JSON。
+
+        Args:
+            website: 站点名。
+            cookies: cookie 列表（None 按空列表处理）。
+
+        Returns:
+            int: 实际写入的 cookie 条数。
         """
         os.makedirs(cookies_path(), exist_ok=True)
         path = cls._cookie_file(website)
@@ -55,7 +70,17 @@ class CookieManager:
 
     @classmethod
     def get(cls, website: str) -> list:
-        """返回指定 website 的 cookie 列表；未保存时抛 CookieNotFoundError"""
+        """返回指定 website 的 cookie 列表。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            list: cookie 字典列表（与 Selenium get_cookies() 输出兼容）。
+
+        Raises:
+            CookieNotFoundError: 未保存 cookie 或 cookie 文件为空。
+        """
         path = cls._cookie_file(website)
         if not os.path.exists(path):
             raise CookieNotFoundError(
@@ -70,12 +95,26 @@ class CookieManager:
 
     @classmethod
     def get_header(cls, website: str) -> str:
-        """把 cookie 拼成 'k1=v1; k2=v2' 形式，可直接作 requests 的 Cookie 请求头"""
+        """把 cookie 拼成 'k1=v1; k2=v2' 形式，可直接作 requests 的 Cookie 请求头。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            str: Cookie 请求头字符串。
+        """
         return '; '.join(f"{c['name']}={c['value']}" for c in cls.get(website))
 
     @classmethod
     def delete(cls, website: str) -> bool:
-        """删除指定 website 的 cookie 文件，返回是否存在过"""
+        """删除指定 website 的 cookie 文件。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            bool: 文件是否存在过（存在并已删除为 True）。
+        """
         path = cls._cookie_file(website)
         if os.path.exists(path):
             os.remove(path)
@@ -85,7 +124,12 @@ class CookieManager:
 
     @classmethod
     def status(cls) -> list:
-        """所有已保存 cookie 的概览：[{website, cookieCount, updateTime}]"""
+        """所有已保存 cookie 的概览。
+
+        Returns:
+            list[dict]: 每项形如 {website, cookieCount, updateTime}；文件损坏时
+            cookieCount 为 -1（不静默吞掉）。
+        """
         result = []
         directory = cookies_path()
         if not os.path.isdir(directory):

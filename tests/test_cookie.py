@@ -23,12 +23,14 @@ def cookie_env(monkeypatch, tmp_path):
 
 @pytest.fixture()
 def client():
+    """构建只注册 CookieApi 蓝图的 Flask test_client。"""
     app = Flask(__name__)
     app.register_blueprint(CookieApi().blueprint)
     return app.test_client()
 
 
 def test_cookie_manager_save_get_header_delete():
+    """测试 CookieManager 保存、读取、请求头拼装、状态查询与删除全流程。"""
     assert CookieManager.exists("pixiv") is False
     with pytest.raises(CookieNotFoundError):
         CookieManager.get("pixiv")
@@ -54,6 +56,7 @@ def test_cookie_manager_save_get_header_delete():
 
 
 def test_rewrite_html_makes_same_origin(client):
+    """测试 HTML 中绝对/协议相对/根相对地址与 JS 字符串均改写为代理同源路径并注入 base。"""
     origin = "https://www.pixiv.net"
     html = b"""<html><head><title>t</title></head><body>
       <a href="https://www.pixiv.net/login">abs</a>
@@ -71,6 +74,7 @@ def test_rewrite_html_makes_same_origin(client):
 
 
 def test_status_lists_configured_sites(client):
+    """测试 status 端点按 websites 配置列出站点及其 cookie 状态。"""
     data = client.get("/api/cookie/status").get_json()
     assert data["success"]
     assert data["rows"] == [{"website": "fakesite", "domain": "http://127.0.0.1:8399",
@@ -78,6 +82,7 @@ def test_status_lists_configured_sites(client):
 
 
 def test_login_page_contains_proxy_iframe(client):
+    """测试登录页包含代理 iframe 地址与“完成并保存”入口。"""
     resp = client.get("/api/cookie/fakesite/login_page")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
@@ -86,12 +91,14 @@ def test_login_page_contains_proxy_iframe(client):
 
 
 def test_login_page_unknown_website_400(client):
+    """测试未知站点的登录页返回 400 并在错误信息中指名站点。"""
     resp = client.get("/api/cookie/ghost/login_page")
     assert resp.status_code == 400
     assert "ghost" in resp.get_json()["error"]
 
 
 def test_save_persists_session_cookies(client):
+    """测试 save 端点把代理会话 cookie 持久化并在保存后销毁会话。"""
     session = requests.Session()
     session.cookies.set("sid", "abc", domain="127.0.0.1", path="/")
     _SESSIONS["fakesite"] = session
@@ -106,11 +113,13 @@ def test_save_persists_session_cookies(client):
 
 
 def test_save_without_login_session_fails(client):
+    """测试没有登录会话时 save 端点返回 400。"""
     resp = client.post("/api/cookie/fakesite/save")
     assert resp.status_code == 400
 
 
 def test_delete_endpoint(client):
+    """测试删除 cookie 端点首次成功、重复删除返回未删除。"""
     CookieManager.save("fakesite", [{"name": "a", "value": "b"}])
     assert client.delete("/api/cookie/fakesite").get_json()["removed"] is True
     assert client.delete("/api/cookie/fakesite").get_json()["removed"] is False

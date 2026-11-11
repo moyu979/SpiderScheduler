@@ -35,6 +35,7 @@ def env_setup(monkeypatch, tmp_path):
 
 @pytest.fixture()
 def client():
+    """注册系统管理四个蓝图的 Flask test_client。"""
     app = Flask(__name__)
     app.register_blueprint(ScriptApi().blueprint)
     app.register_blueprint(ConfigApi().blueprint)
@@ -69,6 +70,7 @@ class {name.capitalize()}Work:
 
 
 def test_scripts_info(client, monkeypatch, tmp_path):
+    """测试脚本路由信息端点：未初始化与已初始化（含兜底判定）。"""
     # 未初始化时
     updater.dispatcher = None
     data = client.get("/api/system/scripts").get_json()
@@ -83,6 +85,7 @@ def test_scripts_info(client, monkeypatch, tmp_path):
 
 
 def test_scripts_reload(client, monkeypatch, tmp_path):
+    """测试重载端点成功，以及写坏脚本时返回 400 且旧路由保留。"""
     d = _install_dispatcher(monkeypatch, tmp_path, downloader, "download")
     resp = client.post("/api/system/scripts/reload")
     assert resp.status_code == 200
@@ -98,6 +101,7 @@ def test_scripts_reload(client, monkeypatch, tmp_path):
 
 
 def test_config_list_and_raw_roundtrip(client):
+    """测试配置段列表、raw 读写回环与写盘验证。"""
     sections = client.get("/api/system/config").get_json()["sections"]
     assert "demo" in sections
 
@@ -117,6 +121,7 @@ def test_config_list_and_raw_roundtrip(client):
 
 
 def test_config_raw_rejects_bad_input(client):
+    """测试 raw 写入对坏 YAML/非映射根/未知段/缺 content 的拒绝分支。"""
     resp = client.put("/api/system/config/demo/raw", json={"content": "k: [unclosed\n"})
     assert resp.status_code == 400
     assert "YAML" in resp.get_json()["error"]
@@ -132,6 +137,7 @@ def test_config_raw_rejects_bad_input(client):
 
 
 def test_config_reload_endpoint(client, monkeypatch, tmp_path):
+    """测试 reload 端点从磁盘重读配置。"""
     confs = tmp_path / "confs"
     (confs / "demo.yaml").write_text("k: from-file\n", encoding="utf-8")
     resp = client.post("/api/system/config/reload")
@@ -151,6 +157,7 @@ def _upload(client, kind, content, name, force=False):
 
 
 def test_script_files_listing(client):
+    """测试脚本文件列表：传统单文件与目录式脚本的区分。"""
     files = client.get("/api/system/scripts/download/files").get_json()["files"]
     # env_setup 的 tmp 工作目录没有脚本，但 init_files 没跑；来源列表为空
     assert files == []
@@ -170,6 +177,7 @@ def test_script_files_listing(client):
 
 
 def test_script_source_by_name(client):
+    """测试按名取脚本源码，及缺名/不存在/未知 kind 分支。"""
     import pathlib
     scripts = pathlib.Path(ConfigManager.base_path) / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
@@ -184,6 +192,7 @@ def test_script_source_by_name(client):
 
 
 def test_upload_saves_to_named_file_and_reloads(client, monkeypatch):
+    """测试上传落盘为命名文件后自动重载，路由立即生效。"""
     import pathlib
     sdir = pathlib.Path(ConfigManager.base_path) / "scripts" / "update"
     sdir.mkdir(parents=True, exist_ok=True)
@@ -210,6 +219,7 @@ def test_upload_saves_to_named_file_and_reloads(client, monkeypatch):
 
 
 def test_upload_file_conflict_then_force(client, monkeypatch):
+    """测试同名文件冲突返回 409，force 确认后覆盖成功。"""
     import pathlib
     ddir = pathlib.Path(ConfigManager.base_path) / "scripts" / "download"
     ddir.mkdir(parents=True, exist_ok=True)
@@ -229,6 +239,7 @@ def test_upload_file_conflict_then_force(client, monkeypatch):
 
 
 def test_upload_website_conflict_then_force(client, monkeypatch):
+    """测试 website 被其他文件占用返回 409，force 后新文件接管路由。"""
     import pathlib
     ddir = pathlib.Path(ConfigManager.base_path) / "scripts" / "download"
     ddir.mkdir(parents=True, exist_ok=True)
@@ -251,12 +262,14 @@ def test_upload_website_conflict_then_force(client, monkeypatch):
 
 
 def test_upload_syntax_error_rejected(client):
+    """测试语法错误的脚本被拒绝上传。"""
     resp = _upload(client, "download", "def broken(:\n", name="pixiv")
     assert resp.status_code == 400
     assert "语法错误" in resp.get_json()["error"]
 
 
 def test_upload_saved_but_reload_fails_keeps_old_routes(client, monkeypatch):
+    """测试保存成功但重扫失败时返回 ok=false 且旧路由生效。"""
     import pathlib
     legacy = pathlib.Path(ConfigManager.base_path) / "scripts" / "download_a_work.py"
     legacy.parent.mkdir(parents=True, exist_ok=True)
@@ -274,6 +287,7 @@ def test_upload_saved_but_reload_fails_keeps_old_routes(client, monkeypatch):
 
 
 def test_delete_script_rescans(client, monkeypatch):
+    """测试删除脚本后重扫生效，及重复删除 404 与非法名 400 分支。"""
     import pathlib
     ddir = pathlib.Path(ConfigManager.base_path) / "scripts" / "download"
     ddir.mkdir(parents=True, exist_ok=True)
@@ -291,6 +305,7 @@ def test_delete_script_rescans(client, monkeypatch):
 
 
 def test_upload_rejects_bad_input(client):
+    """测试上传非法 kind/文件名/非 UTF-8 编码被拒，name 留空可从文件名派生。"""
     resp = _upload(client, "ghost", "x = 1\n", name="a")
     assert resp.status_code == 400
 
@@ -321,6 +336,7 @@ def _seed_sites(**sites):
 
 
 def test_websites_list_and_usage(client, db, monkeypatch, tmp_path):
+    """测试站点列表与占用统计（DB 作品占用 + 显式脚本路由）。"""
     _seed_sites(pixiv="https://www.pixiv.net", ghost="https://ghost.example.com")
     _install_dispatcher(monkeypatch, tmp_path, downloader, "ghost")
     with DatabaseManager.get_db_session() as session:
@@ -334,6 +350,7 @@ def test_websites_list_and_usage(client, db, monkeypatch, tmp_path):
 
 
 def test_website_put_creates_and_updates(client):
+    """测试站点入口新增与更新（同一入口为修改）并落盘。"""
     _seed_sites()
     # 新增
     resp = client.put("/api/system/websites/bilibili",
@@ -356,6 +373,7 @@ def test_website_put_creates_and_updates(client):
 
 
 def test_website_put_validates_name_and_url(client):
+    """测试非法站点名与 URL 被校验拒绝，且不写入配置。"""
     _seed_sites()
     # 空名与含斜杠名无法经路由到达（Werkzeug 不匹配空段/编码斜杠），
     # 其余非法名经 percent-encoding 到达，由 API 校验拒绝
@@ -372,6 +390,7 @@ def test_website_put_validates_name_and_url(client):
 
 
 def test_website_delete_with_usage_guard(client, db, monkeypatch, tmp_path):
+    """测试删除被作品引用的站点返回 409 占用明细，force 后才可删。"""
     _seed_sites(pixiv="https://www.pixiv.net")
     with DatabaseManager.get_db_session() as session:
         session.add(Works(workNumber="W1", website="pixiv", state="inQueue"))
@@ -390,6 +409,7 @@ def test_website_delete_with_usage_guard(client, db, monkeypatch, tmp_path):
 
 
 def test_website_delete_unused_and_missing(client, db):
+    """测试未引用站点直接删除，不存在站点返回 404。"""
     _seed_sites(empty="https://empty.example.com")
     # 未被引用 → 直接删除
     resp = client.delete("/api/system/websites/empty")
@@ -443,6 +463,7 @@ def test_upload_explicit_name_overrides_filename(client):
 # ---------- 立即更新 API ----------
 
 def test_update_now_api(client, db, monkeypatch, tmp_path):
+    """测试立即更新端点：404 分支、受理、状态轮询到 done 与数据落库。"""
     import io
     import pathlib
     import time

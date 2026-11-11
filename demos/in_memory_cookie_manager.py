@@ -13,7 +13,7 @@
 
 
 class CookieNotFoundError(Exception):
-    """指定 website 还没有可用的 cookie（与 CookieManager 的行为一致）"""
+    """指定 website 还没有可用的 cookie（与 CookieManager 的行为一致）。"""
 
 
 class InMemoryCookieManager:
@@ -27,9 +27,10 @@ class InMemoryCookieManager:
     """
 
     def __init__(self, cookies: dict = None):
-        """
+        """用预置数据初始化内存存储，条目结构同 CookieManager 的文件存储。
+
         Args:
-            cookies (dict): 预置数据 {website: [cookie 条目, ...]}，可省略，
+            cookies: 预置数据 {website: [cookie 条目, ...]}，可省略，
                 后续随时用 save() 补充。
         """
         self._store = {}
@@ -37,25 +38,60 @@ class InMemoryCookieManager:
             self.save(website, items)
 
     def exists(self, website: str) -> bool:
-        """指定 website 是否已有可用的 cookie"""
+        """指定 website 是否已有可用的 cookie。"""
         return bool(self._store.get(website))
 
     def save(self, website: str, cookies: list) -> int:
-        """覆盖保存指定 website 的 cookie 列表，返回条数"""
+        """覆盖保存指定 website 的 cookie 列表。
+
+        Args:
+            website: 站点名。
+            cookies: Selenium 格式的 cookie 条目列表；None/空视为清空。
+
+        Returns:
+            int: 保存后的条目数。
+        """
         self._store[website] = list(cookies or [])
         return len(self._store[website])
 
     def get(self, website: str) -> list:
-        """返回指定 website 的 cookie 列表；没有时抛 CookieNotFoundError"""
+        """返回指定 website 的 cookie 列表。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            list: Selenium 格式的 cookie 条目列表，可直接逐条 add_cookie。
+
+        Raises:
+            CookieNotFoundError: 该 website 没有可用 cookie。
+        """
         cookies = self._store.get(website)
         if not cookies:
             raise CookieNotFoundError(f"内存 cookie 中没有 website={website!r} 的记录")
         return cookies
 
     def get_header(self, website: str) -> str:
-        """把 cookie 拼成 "k1=v1; k2=v2"，可直接作 requests 的 Cookie 请求头"""
+        """把 cookie 拼成 "k1=v1; k2=v2" 请求头字符串。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            str: 可直接作 requests 的 Cookie 请求头。
+
+        Raises:
+            CookieNotFoundError: 该 website 没有可用 cookie。
+        """
         return "; ".join(f"{c['name']}={c['value']}" for c in self.get(website))
 
     def delete(self, website: str) -> bool:
-        """删除指定 website 的 cookie，返回是否存在过"""
+        """删除指定 website 的 cookie。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            bool: 该 website 是否存在过（存在才实际删除）。
+        """
         return self._store.pop(website, None) is not None

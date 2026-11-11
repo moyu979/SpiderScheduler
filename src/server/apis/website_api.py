@@ -70,9 +70,13 @@ class WebsitesApi:
 
     提供站点列表（含占用统计）、新增/更新入口地址、带占用保护的删除。
     所有写操作即时持久化到 websites.yaml 并在内存生效。
+
+    Attributes:
+        blueprint: 挂载全部路由的 Flask 蓝图。
     """
 
     def __init__(self):
+        """创建蓝图并注册全部站点管理路由。"""
         self.blueprint = Blueprint("system_website_api", __name__, url_prefix="/api/system")
         self._register_routes()
 
@@ -81,7 +85,11 @@ class WebsitesApi:
 
         @self.blueprint.route("/websites")
         def list_websites():
-            """列出全部站点入口与占用统计。"""
+            """列出全部站点入口与占用统计。
+
+            Returns:
+                JSON：success、sites（站点名 → 入口地址）与 usage（占用统计）。
+            """
             with ConfigManager._config_lock:
                 sites = dict(ConfigManager.config_dict.get("websites") or {})
             return jsonify({"success": True, "sites": sites, "usage": _usage()})
@@ -92,6 +100,10 @@ class WebsitesApi:
 
             Body: {"url": "https://..."}；站点名会成为 cookie 文件名与 URL
             片段，仅允许字母/数字/下划线/连字符。
+
+            Returns:
+                JSON：success、website、url 与 created（是否为新增）；
+                名称/URL 非法 400，websites 段缺失 404。
             """
             name = name.strip()
             if not _NAME_RE.match(name):
@@ -113,7 +125,12 @@ class WebsitesApi:
 
         @self.blueprint.route("/websites/<name>", methods=["DELETE"])
         def delete_website(name):
-            """删除站点入口；仍被作品/位点/脚本路由引用时要求 force=true。"""
+            """删除站点入口；仍被作品/位点/脚本路由引用时要求 force=true。
+
+            Returns:
+                JSON：success、removed 与 usage；仍被引用且未带 force 时
+                409 附 usage，websites 段缺失或站点不存在 404。
+            """
             if "websites" not in ConfigManager.config_dict:
                 return _err("配置段 websites 不存在", 404)
             usage = _usage().get(name)

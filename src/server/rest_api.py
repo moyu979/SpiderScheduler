@@ -26,9 +26,16 @@ class RestApiService:
     组装 Flask 应用：注册全部 API 蓝图、托管前端单页（/）、注册错误处理
     （含登录代理页根相对请求的 404 救援）。使用 werkzeug make_server 以支持
     优雅关闭。
+
+    Attributes:
+        app: Flask 应用实例。
+        host: 监听地址（system.rest_api_host 配置项）。
+        port: 监听端口（system.rest_api_port 配置项）。
+        debug: 是否调试模式（system.debug 配置项，缺省 False）。
     """
     
     def __init__(self):
+        """创建 Flask 应用、读取监听配置并完成全部注册。"""
         logger.info("REST API 服务初始化开始")
         
         # 创建 Flask 应用
@@ -56,15 +63,16 @@ class RestApiService:
         logger.info("REST API 服务初始化完成")
 
     def _register_web(self):
-        """托管前端单页应用（src/server/web/index.html），与 API 同源无需 CORS"""
+        """托管前端单页应用（src/server/web/index.html），与 API 同源无需 CORS。"""
         web_dir = Path(__file__).resolve().parent / "web"
 
         @self.app.route("/")
         def index():
+            """返回前端单页 index.html。"""
             return send_from_directory(web_dir, "index.html")
     
     def _register_apis(self):
-        """注册所有 API 模块"""
+        """注册所有 API 模块。"""
         # 创建 API 实例
         download_api = DownloadApi()
         update_api = UpdateApi()
@@ -86,10 +94,11 @@ class RestApiService:
         logger.info("所有 API 模块已注册")
     
     def _register_error_handlers(self):
-        """注册全局错误处理器"""
+        """注册全局错误处理器（404/405/500 与未捕获异常兜底）。"""
         
         @self.app.errorhandler(404)
         def not_found(error):
+            """404 兜底：代理页来源的请求重定向回代理路径，其余返回 JSON 错误。"""
             # 登录代理页里 JS 发出的根相对请求（fetch('/x')）会落到本应用 404；
             # 若来自代理页，重定向回代理路径救回来
             referer = request.headers.get('Referer', '')
@@ -110,6 +119,7 @@ class RestApiService:
         
         @self.app.errorhandler(405)
         def method_not_allowed(error):
+            """405 兜底：返回 JSON 错误结构。"""
             return jsonify({
                 'success': False,
                 'error': 'HTTP 方法不允许',
@@ -118,6 +128,7 @@ class RestApiService:
         
         @self.app.errorhandler(500)
         def internal_error(error):
+            """500 兜底：记录日志并返回 JSON 错误结构。"""
             logger.error(f"服务器内部错误: {error}")
             return jsonify({
                 'success': False,
@@ -127,6 +138,7 @@ class RestApiService:
         
         @self.app.errorhandler(Exception)
         def handle_exception(e):
+            """未捕获异常兜底：记录日志并返回 JSON 错误结构。"""
             logger.error(f"未处理的异常: {e}")
             return jsonify({
                 'success': False,
@@ -135,7 +147,11 @@ class RestApiService:
             }), 500
     
     def start(self):
-        """启动 HTTP 服务并阻塞（应在后台线程调用）。"""
+        """启动 HTTP 服务并阻塞（应在后台线程调用）。
+
+        Raises:
+            Exception: 启动失败时记录日志后原样抛出。
+        """
         try:
             logger.info(f"启动 REST API 服务: {self.host}:{self.port}")
             # 使用 Werkzeug 服务器，可以优雅关闭
@@ -171,12 +187,11 @@ rest_api: Optional[RestApiService] = None
 
 
 def init(run_in_background: bool = True):
-    """
-    初始化并启动 REST API 服务器
-    
+    """初始化并启动 REST API 服务器。
+
     Args:
-        run_in_background: 是否在后台线程运行，默认 True
-    
+        run_in_background: 是否在后台线程运行，默认 True。
+
     使用示例:
         from src.server.rest_api import init
         init()  # 后台运行

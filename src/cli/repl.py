@@ -25,6 +25,10 @@ class SpiderSchedulerCmd(cmd.Cmd):
     """SpiderScheduler 交互命令行。
 
     旧命令别名（add-user）通过 default() 做映射以保持兼容。
+
+    Attributes:
+        intro: 进入交互模式时打印的欢迎语。
+        prompt: 命令提示符。
     """
 
     intro = "SpiderScheduler 内置命令行。输入 help 或 ? 查看命令。"
@@ -35,11 +39,11 @@ class SpiderSchedulerCmd(cmd.Cmd):
 
         用法: add-pos <authorId> [website]
 
-        Args:
-            arg: 空格分隔的参数；authorId 必填，website 可选（默认 pixiv）。
-
         写入 publish_pos 表（state=inQueue）；已存在（同 authorId+website）时提示。
         兼容旧命令名 add-user。
+
+        Args:
+            arg: 空格分隔的参数；authorId 必填，website 可选（默认 pixiv）。
         """
         try:
             parts = shlex.split(arg)
@@ -90,15 +94,27 @@ class SpiderSchedulerCmd(cmd.Cmd):
         return super().default(line)
 
     def do_exit(self, arg: str) -> bool:  # type: ignore[override]
-        """退出命令行（exit）"""
+        """退出命令行（exit）。
+
+        Returns:
+            bool: True，令 cmd.Cmd 结束命令循环。
+        """
         return True
 
     def do_quit(self, arg: str) -> bool:  # type: ignore[override]
-        """退出命令行（quit）"""
+        """退出命令行（quit）。
+
+        Returns:
+            bool: True，令 cmd.Cmd 结束命令循环。
+        """
         return True
 
     def do_EOF(self, arg: str) -> bool:  # type: ignore[override]
-        """Ctrl+D 退出"""
+        """Ctrl+D 退出。
+
+        Returns:
+            bool: True，令 cmd.Cmd 结束命令循环。
+        """
         self.stdout.write("\n")
         return True
 

@@ -1,3 +1,4 @@
+"""日志调用方归因测试：实例方法与 classmethod 归因到用户类，及月度轮转。"""
 import logging
 import os
 from datetime import datetime

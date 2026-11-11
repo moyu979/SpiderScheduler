@@ -120,7 +120,14 @@ class ScriptTools:
         return {"http": url, "https": url} if url else {}
 
     def _proxy_address(self, proxy):
-        """解析 get_driver 的 proxy 参数为实际代理地址（None 表示不走代理）。"""
+        """解析 get_driver 的 proxy 参数为实际代理地址。
+
+        Args:
+            proxy: "auto" 按配置决定，否则原样作为代理地址。
+
+        Returns:
+            str | None: 实际代理地址；None 表示不走代理。
+        """
         if proxy == "auto":
             return self.proxy_url()
         return proxy
@@ -129,7 +136,16 @@ class ScriptTools:
 
     @staticmethod
     def _selenium_cookie(cookie):
-        """文件存储的 'expires' 键转为 add_cookie 认的 'expiry'，剔除未知键。"""
+        """把文件存储的单条 cookie 转为 add_cookie 认可的格式。
+
+        'expires' 键转成 'expiry'，剔除 add_cookie 不认识的键。
+
+        Args:
+            cookie: 文件存储的单条 cookie 字典。
+
+        Returns:
+            dict: Selenium 可用的 cookie 字典。
+        """
         known = ("name", "value", "path", "domain", "secure", "httpOnly", "sameSite")
         converted = {k: cookie[k] for k in known if cookie.get(k) is not None}
         expires = cookie.get("expiry") or cookie.get("expires")

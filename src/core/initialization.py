@@ -20,6 +20,9 @@ def init_files() -> None:
 
     递归复制 src/assets 下的全部文件到 BASEPATH；只补缺失文件、绝不覆盖
     已有文件，因此用户的配置修改和上传的脚本不会被启动抹掉。
+
+    Raises:
+        FileNotFoundError: assets 模板目录不存在。
     """
     assets_dir = Path(__file__).resolve().parent.parent / "assets"
     docker_dir = Path(config_manager.base_path)

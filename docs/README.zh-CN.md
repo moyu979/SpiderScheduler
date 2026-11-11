@@ -48,15 +48,17 @@ class DownloadWork:
     website = "pixiv"            # 声明适用的站点；不声明则作为单站兜底
 
     def __init__(self, work_info, download_path, download_info=None):
-        # download_path：本任务专属目录（缓存开=缓存工作目录，关=最终目录），写这里即可
+        # download_path：站点级下载根 <根>/<站点>/（缓存开=缓存根，关=最终根），
+        #                作品子目录由脚本自建，写进去即可
         ...
 
     def download_it(self):
-        ...                       # 把数据写进 download_path，返回产物路径
+        ...                       # 返回产物路径（相对下载根或绝对路径）
 ```
 
 脚本头部可用 `# requirements: 包名` 声明依赖，框架在加载前自动安装缺失的包。
-完整的脚本契约、状态机与配置说明见 [使用手册](user-guide.zh-CN.md) 与 [开发手册](dev-guide.zh-CN.md)。
+完整的脚本契约见 [接口文档](interfaces.zh-CN.md)；状态机与配置说明见
+[使用手册](user-guide.zh-CN.md) 与 [开发手册](dev-guide.zh-CN.md)。
 
 ## 目录结构
 
@@ -64,7 +66,7 @@ class DownloadWork:
 SpiderScheduler/
 ├── main.py            # 入口（--repl 命令行、--basepath 工作目录）
 ├── src/               # 调度器、API、前端、基础设施
-├── tests/             # pytest 测试（124 例）
+├── tests/             # pytest 测试（132 例）
 ├── docker/            # 默认工作目录（运行数据，不入库）
 ├── docs/              # 本文档目录
 ├── Dockerfile / docker-compose.yml / .dockerignore
@@ -73,6 +75,7 @@ SpiderScheduler/
 
 ## 文档
 
+- [接口文档](interfaces.zh-CN.md)：DownloadWork / UpdateUser 脚本契约、注入属性、站点配置键、调度服务公共接口。
 - [使用手册](user-guide.zh-CN.md)：安装运行、四个功能页逐项说明、REST API 参考、配置详解、常见问题。
-- [开发手册](dev-guide.zh-CN.md)：架构分层、脚本契约、状态机、数据库与迁移机制、测试、二次开发指南。
+- [开发手册](dev-guide.zh-CN.md)：架构分层、脚本插件生命周期、状态机、数据库与迁移机制、测试、二次开发指南。
 - [ARCHITECTURE.md](../ARCHITECTURE.md)：与代码保持同步的架构设计文档。

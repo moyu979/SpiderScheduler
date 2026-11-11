@@ -1,5 +1,4 @@
-"""
-查询 API：为前端提供作品/用户的组合筛选查询与统计
+"""查询 API：为前端提供作品/用户的组合筛选查询与统计。
 
 筛选维度可任意组合：
 - website：逗号分隔多选
@@ -33,12 +32,30 @@ MAX_LIMIT = 500
 
 
 def _csv(name):
-    """逗号分隔的查询参数 → 去空列表"""
+    """读取逗号分隔的查询参数并切分为去空列表。
+
+    Args:
+        name: 查询参数名。
+
+    Returns:
+        list[str]: 去除首尾空白后的非空片段列表。
+    """
     raw = request.args.get(name, '') or ''
     return [v.strip() for v in raw.split(',') if v.strip()]
 
 
 def _int_arg(name, default, minimum, maximum):
+    """读取整数查询参数并夹到 [minimum, maximum] 区间。
+
+    Args:
+        name: 查询参数名。
+        default: 缺省或无法解析时的取值。
+        minimum: 允许的最小值。
+        maximum: 允许的最大值。
+
+    Returns:
+        int: 夹取后的整数值。
+    """
     try:
         value = int(request.args.get(name, default))
     except (TypeError, ValueError):
@@ -47,7 +64,17 @@ def _int_arg(name, default, minimum, maximum):
 
 
 def _state_conditions(column, states):
-    """state 多选；'none' 表示 NULL（兼容更新器启用前的旧数据）"""
+    """构造 state 多选过滤条件。
+
+    'none' 表示 NULL（兼容更新器启用前的旧数据）。
+
+    Args:
+        column: state 列。
+        states: 选中的状态值列表。
+
+    Returns:
+        OR 组合后的 SQLAlchemy 过滤条件。
+    """
     conds = []
     for s in states:
         if s.lower() == 'none':
@@ -58,7 +85,16 @@ def _state_conditions(column, states):
 
 
 def _date_conditions(column, date_from, date_to):
-    """日期区间：字符串比较，to 端补时间上限以覆盖整天"""
+    """构造日期区间条件：字符串比较，to 端补时间上限以覆盖整天。
+
+    Args:
+        column: 日期列（ISO 格式字符串）。
+        date_from: 起始日期（含），可为空。
+        date_to: 结束日期（含），可为空。
+
+    Returns:
+        list: 过滤条件列表（可能为空）。
+    """
     conds = []
     if date_from:
         conds.append(column >= date_from)
@@ -68,7 +104,21 @@ def _date_conditions(column, date_from, date_to):
 
 
 def _apply_common_filters(query, model, date_fields, sort_fields, default_sort):
-    """website / state / 日期 / keyword / 排序 的公共拼装"""
+    """为查询拼装 website / state / 日期 / keyword / 排序的公共过滤。
+
+    Args:
+        query: 待过滤的 SQLAlchemy 查询。
+        model: 查询的模型类（Works 或 PublishPos）。
+        date_fields: 该模型可用的日期字段映射。
+        sort_fields: 该模型允许的排序字段白名单。
+        default_sort: 未指定排序时的默认字段名。
+
+    Returns:
+        拼装完过滤与排序的查询对象。
+
+    Raises:
+        ValueError: 日期字段或排序字段不在白名单内。
+    """
     websites = _csv('website')
     if websites:
         query = query.filter(model.website.in_(websites))
@@ -114,10 +164,17 @@ def _apply_common_filters(query, model, date_fields, sort_fields, default_sort):
 
 
 def _page_args():
+    """解析分页参数 limit/offset。
+
+    Returns:
+        tuple[int, int]: (limit, offset)；limit 默认 50、上限 MAX_LIMIT，
+        offset 默认 0。
+    """
     return _int_arg('limit', 50, 1, MAX_LIMIT), max(_int_arg('offset', 0, 0, 10 ** 9), 0)
 
 
 def _err(message, code=400):
+    """统一错误响应：success=False + error=message 的 JSON 与状态码。"""
     return jsonify({'success': False, 'error': message}), code
 
 
@@ -126,17 +183,28 @@ class QueryApi:
 
     筛选维度可任意组合（website / state 多选 / author / 日期区间 / keyword），
     排序字段走白名单，分页由 limit/offset 控制。
+
+    Attributes:
+        blueprint: 挂载全部路由的 Flask 蓝图。
     """
 
     def __init__(self):
+        """创建蓝图并注册全部查询路由。"""
         self.blueprint = Blueprint('query_api', __name__, url_prefix='/api/query')
         self._register_routes()
 
     def _register_routes(self):
+        """注册全部查询路由。"""
 
         @self.blueprint.route('/works')
         def query_works():
-            """组合筛选作品列表"""
+            """组合筛选作品列表。
+
+            Returns:
+                JSON：success、total、limit、offset 与 items（作品字段，
+                otherInfo 可解析时附带 siteState）；排序/日期字段非法 400，
+                查询异常 500。
+            """
             try:
                 logger.debug(f"query works 参数: {request.query_string.decode('utf-8', errors='replace')}")
                 limit, offset = _page_args()
@@ -186,7 +254,12 @@ class QueryApi:
 
         @self.blueprint.route('/positions')
         def query_positions():
-            """组合筛选发布位点列表（附带每个位点的作品关联数）"""
+            """组合筛选发布位点列表（附带每个位点的作品关联数）。
+
+            Returns:
+                JSON：success、total、limit、offset 与 items（位点字段 +
+                workCount）；排序/日期字段非法 400，查询异常 500。
+            """
             try:
                 logger.debug(f"query positions 参数: {request.query_string.decode('utf-8', errors='replace')}")
                 limit, offset = _page_args()
@@ -228,7 +301,12 @@ class QueryApi:
 
         @self.blueprint.route('/stats')
         def query_stats():
-            """按 website × state 的计数统计，供前端生成筛选选项和概览条"""
+            """按 website × state 的计数统计，供前端生成筛选选项和概览条。
+
+            Returns:
+                JSON：success 与 works/positions（website → state → 计数，
+                state 为 NULL 记作 'none'）；查询异常 500。
+            """
             try:
                 with DatabaseManager.get_db_session() as session:
                     work_rows = (
@@ -243,6 +321,7 @@ class QueryApi:
                     )
 
                 def build(rows):
+                    """把 (website, state, count) 行聚合成 website → state → 计数。"""
                     result = {}
                     for website, state, count in rows:
                         site = result.setdefault(website, {})
@@ -260,7 +339,14 @@ class QueryApi:
 
 
 def _safe_json(raw):
-    """downloadInfo/otherInfo 是 JSON 文本；能解析则给对象，否则原样返回"""
+    """解析 JSON 文本字段；能解析则给对象，否则原样返回。
+
+    Args:
+        raw: downloadInfo/otherInfo 的原始文本。
+
+    Returns:
+        解析后的对象；无法解析（或为 None）时原样返回。
+    """
     if raw is None:
         return None
     try:

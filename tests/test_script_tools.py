@@ -25,6 +25,7 @@ def _make_tools(cookie_manager=None):
 # ---------------- 日志与站点信息 ----------------
 
 def test_log_dispatches_to_logger_facade():
+    """测试 log 按级别（大小写不敏感）分发到底层 logger。"""
     calls = []
 
     class _StubLogger:
@@ -38,10 +39,12 @@ def test_log_dispatches_to_logger_facade():
 
 
 def test_site_origin_reads_websites_and_strips_trailing_slash(tools_env):
+    """测试站点地址读取自 websites 配置并去掉尾部斜杠。"""
     assert _make_tools().site_origin() == "http://127.0.0.1:9000"
 
 
 def test_site_origin_raises_for_unconfigured_site(tools_env):
+    """测试未配置站点取地址时报 ScriptToolsError 并指名站点。"""
     tools = ScriptTools(website="ghost")
     with pytest.raises(ScriptToolsError, match="ghost"):
         tools.site_origin()
@@ -50,6 +53,8 @@ def test_site_origin_raises_for_unconfigured_site(tools_env):
 # ---------------- 浏览器装配（桩测 selenium） ----------------
 
 class _FakeOptions:
+    """记录 add_argument 调用的假 ChromeOptions。"""
+
     def __init__(self):
         self.arguments = []
 
@@ -130,6 +135,7 @@ def fake_selenium(monkeypatch):
 
 
 def test_get_driver_headless_assembles_and_overrides_ua(tools_env, fake_selenium):
+    """测试无头装配：默认参数、extra_arguments 与 CDP 去除 HeadlessChrome 标记。"""
     tools = _make_tools(cookie_manager=_StubCookieManager([]))
     driver = tools.get_driver(headless=True, extra_arguments=["--lang=zh-CN"])
 
@@ -147,6 +153,7 @@ def test_get_driver_headless_assembles_and_overrides_ua(tools_env, fake_selenium
 
 
 def test_get_driver_injects_cookies_with_expiry_conversion(tools_env, fake_selenium):
+    """测试 cookie 注入与 expires→expiry 取整转换，有头模式不做 UA 覆盖。"""
     cookies = [{"name": "SESSDATA", "value": "abc", "domain": ".example.com",
                 "path": "/", "expires": 1790000000.5, "secure": True},
                {"name": "bad", "value": "x", "unknown_key": 1}]
@@ -163,12 +170,14 @@ def test_get_driver_injects_cookies_with_expiry_conversion(tools_env, fake_selen
 
 
 def test_get_driver_anonymous_without_cookie_file(tools_env, fake_selenium):
+    """测试无 cookie 文件时匿名打开站点入口、不注入 cookie。"""
     tools = _make_tools(cookie_manager=_StubCookieManager([]))
     driver = tools.get_driver()
     assert driver.pages == ["http://127.0.0.1:9000"] and driver.cookies == []
 
 
 def test_get_driver_missing_selenium_gives_actionable_error(tools_env, monkeypatch):
+    """测试未安装 selenium 时报含 # requirements 提示的可操作错误。"""
     import builtins
     real_import = builtins.__import__
 
@@ -183,6 +192,7 @@ def test_get_driver_missing_selenium_gives_actionable_error(tools_env, monkeypat
 
 
 def test_get_driver_failure_cleans_up_driver(tools_env, fake_selenium, monkeypatch):
+    """测试装配中途失败时已创建的 driver 被 quit 清理。"""
     # 站点未配置入口 → 装配失败，driver 必须被 quit
     ConfigManager.config_dict["websites"].clear()
     tools = _make_tools(cookie_manager=_StubCookieManager([]))
@@ -199,6 +209,7 @@ def _enable_proxy(ip="127.0.0.1", port="7897"):
 
 
 def test_proxy_disabled_yields_none_and_empty_proxies(tools_env, fake_selenium):
+    """测试未启用代理时 proxy_url/get_proxies 为空且 driver 不注入代理参数。"""
     tools = _make_tools()
     assert tools.proxy_url() is None
     assert tools.get_proxies() == {}
@@ -207,6 +218,7 @@ def test_proxy_disabled_yields_none_and_empty_proxies(tools_env, fake_selenium):
 
 
 def test_proxy_auto_applies_to_driver_and_requests(tools_env, fake_selenium):
+    """测试启用配置代理后 driver 启动参数与 requests 代理字典都生效。"""
     _enable_proxy()
     tools = _make_tools()
     assert tools.proxy_url() == "http://127.0.0.1:7897"
@@ -217,6 +229,7 @@ def test_proxy_auto_applies_to_driver_and_requests(tools_env, fake_selenium):
 
 
 def test_proxy_explicit_address_and_force_disable(tools_env, fake_selenium):
+    """测试显式代理地址优先于配置，proxy=None 强制不走代理。"""
     _enable_proxy()
     tools = _make_tools()
     # 显式地址（如 socks5）优先于配置
@@ -228,12 +241,14 @@ def test_proxy_explicit_address_and_force_disable(tools_env, fake_selenium):
 
 
 def test_proxy_url_accepts_full_address_in_proxy_ip(tools_env):
+    """测试 proxy_ip 直接填完整地址（含 scheme）时原样使用。"""
     _enable_proxy(ip="socks5://10.0.0.1", port="1080")
     tools = _make_tools()
     assert tools.proxy_url() == "socks5://10.0.0.1"
 
 
 def test_proxy_off_when_use_proxy_false(tools_env):
+    """测试 use_proxy=false 时即使配置了地址也不走代理。"""
     _enable_proxy()
     ConfigManager.config_dict["system"]["use_proxy"] = False
     tools = _make_tools()
@@ -241,6 +256,7 @@ def test_proxy_off_when_use_proxy_false(tools_env):
 
 
 def test_get_driver_chrome_path_passes_service(tools_env, fake_selenium):
+    """测试 chrome_path 经 Service 传入 driver。"""
     tools = _make_tools(cookie_manager=_StubCookieManager([]))
     tools.get_driver(chrome_path="/fake/chromedriver")
     service = fake_selenium[-1].init_kwargs.get("service")
@@ -252,6 +268,7 @@ def test_get_driver_chrome_path_passes_service(tools_env, fake_selenium):
 # ---------------- 动态注册 ----------------
 
 def test_register_adds_callable_and_validates(tools_env):
+    """测试动态注册新方法成功，重名与非法工具名被拒绝。"""
     tools = _make_tools()
     tools.register("screenshot", lambda self_, path: f"shot-{path}")
     assert tools.screenshot("x") == "shot-x"

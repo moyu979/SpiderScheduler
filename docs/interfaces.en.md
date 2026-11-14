@@ -70,7 +70,15 @@ Assigned by the framework **after** construction (do **not** read them in
 `exists(website)` / `get(website)` (for Selenium `add_cookie`) /
 `get_header(website)` (requests `Cookie` header) / `save(website, cookies)` /
 `delete(website)` / `status()` (overview of all cookies, for the Cookie tab).
-Files live at `BASEPATH/datas/cookies/<website>.json`, written by the login proxy.
+`cookie_file(website)` exposes the raw storage path (Selenium JSON). For CLI
+tools that only read Netscape `cookies.txt` (you-get, yt-dlp, …),
+`netscape_file(website)` returns a framework-managed export at
+`BASEPATH/datas/cookies/netscape/<website>.txt` — generated on demand and
+refreshed automatically whenever the source JSON changes; pass the path
+straight to `--cookies`, no temp-file handling needed.
+`netscape_lines(cookies)` converts any Selenium-format cookie list to Netscape
+text lines (for temp-file export of memory-passed cookies). JSON files live at
+`BASEPATH/datas/cookies/<website>.json`, written by the login proxy.
 
 ### 2.3 Templates and Examples
 
@@ -214,6 +222,7 @@ between fetches; pure-API sites may ignore it).
 | `title` / `kind` | | source-site metadata |
 | `state` | | the source site's own state → stored in `otherInfo.siteState` (never the pipeline state) |
 | `downloadDate` / `downloadPriority` | | download-pipeline fields (optional) |
+| `downloadInfo` | | per-work download params (optional dict): merged with the preset `{"authorId", "workNumber"}` then stored as JSON; yielded keys win on conflict |
 
 **Yield from newest to oldest** — incremental sync depends on the order.
 
@@ -224,7 +233,9 @@ between fetches; pure-API sites may ignore it).
   this position** (the script does not need to dedupe);
 - new works are inserted into `works` (existing ones skipped; races fall back
   to IntegrityError handling), `state` is always `inQueue`, and `downloadInfo`
-  is pre-filled with `{"authorId", "workNumber"}`;
+  is the preset `{"authorId", "workNumber"}` merged with the yielded
+  `downloadInfo` (if any); non-dict or unserializable values are logged and
+  fall back to the preset;
 - the `upload` link is created (existing ones skipped).
 
 ### 4.5 Per-Site Config Keys (`site` section of update.yaml)

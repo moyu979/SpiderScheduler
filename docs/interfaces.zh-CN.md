@@ -61,7 +61,13 @@
 `CookieManager`（`src/utils/cookie_manager.py`）公开接口：`exists(website)` /
 `get(website)`（Selenium 逐条 `add_cookie` 用）/ `get_header(website)`（requests
 Cookie 头用）/ `save(website, cookies)` / `delete(website)` / `status()`（全部
-cookie 概览，供 Cookie 页展示）。cookie 文件在
+cookie 概览，供 Cookie 页展示）。`cookie_file(website)` 暴露原始存储路径
+（Selenium JSON）。you-get / yt-dlp 等只认 Netscape `cookies.txt` 的命令行工具
+用 `netscape_file(website)`：返回框架管理的导出路径
+`BASEPATH/datas/cookies/netscape/<website>.txt`——按需生成、源 JSON 更新后自动
+重导，路径直接拼进 `--cookies` 即可，脚本无需自建临时文件；
+`netscape_lines(cookies)` 把任意 Selenium 格式列表转成 Netscape 文本行（内存
+传入 cookie 的临时导出用）。cookie 文件在
 `BASEPATH/datas/cookies/<website>.json`，由登录代理落盘。
 
 ### 2.3 模板与示例
@@ -193,6 +199,7 @@ Selenium `list[dict]`、`{name: value}` dict、`"k=v; k=v"` 字符串；该键�
 | `title` / `kind` | | 源站元数据 |
 | `state` | | 源站自身状态 → 框架存入 `otherInfo.siteState`（不进下载管线 state） |
 | `downloadDate` / `downloadPriority` | | 下载管线字段（可选） |
+| `downloadInfo` | | 作品级统一下载参数（可选 dict）：与预置 `{"authorId", "workNumber"}` 合并后转 JSON 落盘，同名键以产出为准 |
 
 **产出顺序必须从新到旧**——增量同步语义依赖它。
 
@@ -201,7 +208,9 @@ Selenium `list[dict]`、`{name: value}` dict、`"k=v; k=v"` 字符串；该键�
 - 迭代中每条先查 `upload` 关联：**已存在即视为该位点已同步到此处，框架停止本
   位点迭代**（脚本无需自己判重）；
 - 新作品写 `works`（已存在则跳过；并发竞态由 IntegrityError 兜底），
-  `state` 统一 `inQueue`，`downloadInfo` 预置 `{"authorId", "workNumber"}`；
+  `state` 统一 `inQueue`，`downloadInfo` 为预置 `{"authorId", "workNumber"}`
+  与产出 `downloadInfo`（如有）的合并结果——非 dict 或不可序列化时告警并
+  降级为预置；
 - 建 `upload` 关联（已存在跳过）。
 
 ### 4.5 站点配置键（update.yaml 的 site 段）

@@ -70,8 +70,10 @@ selenium 就必须声明。
 
 **CookieManager**：`exists(website)` / `get_header(website)`（requests 的 Cookie
 头字符串）/ `get(website)`（Selenium 逐条 `add_cookie` 用的 list[dict]）/
-`save` / `delete` / `status()`。cookie 文件由登录代理落盘在
-`BASEPATH/datas/cookies/<website>.json`。
+`save` / `delete` / `status()`；CLI 工具场景用 `netscape_file(website)`
+（Netscape cookies.txt 导出路径，见下文）、`netscape_lines(cookies)`（纯转换，
+内存传入 cookie 的临时导出用）、`cookie_file(website)`（原始 JSON 路径，极少
+用）。cookie 文件由登录代理落盘在 `BASEPATH/datas/cookies/<website>.json`。
 
 **ScriptTools**：
 

@@ -340,6 +340,31 @@ class Updater:
                 if site_state is not None else None
             )
 
+            # 统一下载参数：预置 作者 + 作品号（对 bilibili 即作者 + BV 号），
+            # 更新器可经 item["downloadInfo"]（dict）补充或覆盖作品级参数——框架
+            # 与预置合并后转 JSON 落盘，同名键以更新器产出为准；非 dict 或序列化
+            # 失败时告警并降级为预置。下载脚本经 download_info 按需取用。
+            # 仅在新建作品时写入，不覆盖用户经 add_work 手工填写的参数。
+            download_info = {'authorId': author_id, 'workNumber': work_number}
+            extra_info = item.get('downloadInfo')
+            if extra_info is not None:
+                if isinstance(extra_info, dict):
+                    download_info.update(extra_info)
+                else:
+                    logger.warning(
+                        f"作品 {work_number}@{website} 的 downloadInfo 不是 dict，"
+                        "已忽略（使用预置参数）")
+            try:
+                download_info_text = json.dumps(download_info, ensure_ascii=False)
+            except (TypeError, ValueError) as e:
+                # 更新器塞了不可序列化的对象：降级为预置参数，不让整个位点迭代崩掉
+                logger.warning(
+                    f"作品 {work_number}@{website} 的 downloadInfo 序列化失败({e})，"
+                    "已降级为预置参数")
+                download_info_text = json.dumps(
+                    {'authorId': author_id, 'workNumber': work_number},
+                    ensure_ascii=False)
+
             works_data = {
                 'workNumber': work_number,
                 'website': website,
@@ -352,12 +377,7 @@ class Updater:
                 'downloadDate': item.get('downloadDate'),
                 'downloadPriority': item.get('downloadPriority') or 0,
                 'otherInfo': other_info,
-                # 统一下载参数：作者 + 作品号（对 bilibili 即作者 + BV 号），
-                # 下载脚本经 download_info 按需取用（如按作者归档）。
-                # 仅在新建作品时写入，不覆盖用户经 add_work 手工填写的参数。
-                'downloadInfo': json.dumps(
-                    {'authorId': author_id, 'workNumber': work_number},
-                    ensure_ascii=False),
+                'downloadInfo': download_info_text,
             }
 
             # 先查关联：已存在说明该位点已同步到这里，直接停止本位点迭代。

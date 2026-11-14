@@ -231,6 +231,52 @@ class NowUpdater:
         assert json.loads(work.downloadInfo) == {"authorId": "a", "workNumber": "NOW1"}
 
 
+def test_update_position_now_merges_yielded_download_info(db, tmp_path):
+    """更新器可经 item["downloadInfo"] 产出作品级下载参数：与预置合并落盘，异常形态降级。"""
+    import json
+
+    from src.service.dispatcher import ScriptDispatcher
+    from src.utils.database.models import Works
+
+    with DatabaseManager.get_db_session() as s:
+        s.add(PublishPos(authorId="a", website="pixiv", state="inQueue"))
+    script = tmp_path / "merge_updater.py"
+    script.write_text('''
+class MergeUpdater:
+    website = "pixiv"
+
+    def __init__(self, usr, logging):
+        self.author_id = usr.get("authorId")
+
+    def __iter__(self):
+        yield {"workid": "M1", "downloadInfo": {"quality": "1080p", "authorId": "a"}}
+        yield {"workid": "M2", "downloadInfo": "not-a-dict"}
+        yield {"workid": "M3"}
+        yield {"workid": "M4", "downloadInfo": {"bad": object()}}
+''', encoding='utf-8')
+    u = Updater()
+    u.dispatcher = ScriptDispatcher(sources=[str(script)], fallback_class_name="NoSuchClass")
+
+    result = u.update_position_now("pixiv", "a")
+    assert result["started"] is True
+    status = _wait_status(u, "pixiv|a")
+    assert status["state"] == "done" and status["added"] == 4
+
+    with DatabaseManager.get_db_session() as s:
+        # dict 产出：与预置合并，同名键以产出为准
+        assert json.loads(s.get(Works, ("M1", "pixiv")).downloadInfo) == {
+            "authorId": "a", "workNumber": "M1", "quality": "1080p"}
+        # 非 dict：告警并降级为预置
+        assert json.loads(s.get(Works, ("M2", "pixiv")).downloadInfo) == {
+            "authorId": "a", "workNumber": "M2"}
+        # 未产出：预置不变（向后兼容）
+        assert json.loads(s.get(Works, ("M3", "pixiv")).downloadInfo) == {
+            "authorId": "a", "workNumber": "M3"}
+        # 含不可序列化对象：整体降级为预置
+        assert json.loads(s.get(Works, ("M4", "pixiv")).downloadInfo) == {
+            "authorId": "a", "workNumber": "M4"}
+
+
 def test_update_position_now_validations(db):
     """测试立即更新对不存在与已停止位点返回对应原因。"""
     with DatabaseManager.get_db_session() as s:

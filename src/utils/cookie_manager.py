@@ -5,6 +5,12 @@
 {name, value, domain, path, expires, secure, ...}——与 Selenium get_cookies() 输出
 兼容，可直接逐条 add_cookie 给浏览器；requests 场景用 get_header() 拼_COOKIE 头。
 
+Netscape 导出：you-get / yt-dlp 等命令行工具只认 Netscape cookies.txt（--cookies
+参数），netscape_file() 把 JSON 存储按需导出为 BASEPATH/datas/cookies/netscape/
+<website>.txt，源 JSON 更新后（按 mtime 判断）自动重新导出。脚本直接引用路径，
+无需自己转格式、造临时文件；netscape_lines() 另提供任意 Selenium 格式列表到
+Netscape 文本行的纯转换（内存传入 cookie 的临时导出用）。
+
 cookie 的产生走登录代理（src/server/apis/cookie_api.py）：cookie 不存在时由用户
 在代理出的登录页里手动登录，代理捕获整个登录过程的 Set-Cookie 后落盘。
 """
@@ -26,13 +32,105 @@ class CookieManager:
 
     存储为 JSON 数组，每条 cookie 与 Selenium get_cookies() 输出兼容，
     因此既能逐条 add_cookie 给浏览器，也能经 get_header() 拼成 requests 的
-    Cookie 请求头。
+    Cookie 请求头；netscape_file() 再提供面向 you-get 等 CLI 工具的
+    Netscape cookies.txt 导出路径。
     """
+
+    # 会话 cookie 没有 expires，Netscape 导出时给的远期时间（2^31-1 内，
+    # 兼容各 cookie 解析器）
+    FAR_FUTURE_EXPIRY = 2147483647
 
     @classmethod
     def _cookie_file(cls, website: str) -> str:
         """返回指定 website 的 cookie 文件路径。"""
         return os.path.join(cookies_path(), f"{website}.json")
+
+    @classmethod
+    def cookie_file(cls, website: str) -> str:
+        """返回指定 website 的 cookie 存储文件路径（Selenium JSON 格式）。
+
+        供需要感知原始文件的调用方使用；常规取值用 get() / get_header()。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            str: cookie 文件路径（BASEPATH/datas/cookies/<website>.json）。
+        """
+        return cls._cookie_file(website)
+
+    @classmethod
+    def _netscape_path(cls, website: str) -> str:
+        """返回指定 website 的 Netscape 导出文件路径。"""
+        return os.path.join(cookies_path(), "netscape", f"{website}.txt")
+
+    @classmethod
+    def netscape_lines(cls, cookies: list) -> list:
+        """把 Selenium 格式 cookie 列表转为 Netscape cookies.txt 行（纯转换）。
+
+        每行：domain \\t include_subdomains \\t path \\t secure \\t expires \\t
+        name \\t value；会话 cookie 无 expires 时填远期时间。缺 name 或 domain
+        的条目无法在 Netscape 格式中表达，跳过并告警（不静默吞掉）。
+
+        供两类调用方使用：netscape_file() 的按需导出，以及内存传入 cookie 的
+        脚本侧临时导出（内存 cookie 不经框架存储，临时文件由脚本自管）。
+
+        Args:
+            cookies: Selenium 格式 cookie 字典列表。
+
+        Returns:
+            list[str]: 文本行列表（首行为 Netscape 文件头注释）。
+        """
+        lines = ["# Netscape HTTP Cookie File"]
+        for c in cookies:
+            name, domain = c.get("name"), (c.get("domain") or "").strip()
+            if not name or not domain:
+                logger.warning(f"导出 Netscape cookie 跳过无效条目: {c}")
+                continue
+            include_subdomains = "TRUE" if domain.startswith(".") else "FALSE"
+            path = c.get("path") or "/"
+            secure = "TRUE" if c.get("secure") else "FALSE"
+            try:
+                expires = int(float(c.get("expires") or cls.FAR_FUTURE_EXPIRY))
+            except (TypeError, ValueError):
+                expires = cls.FAR_FUTURE_EXPIRY
+            lines.append("\t".join([domain, include_subdomains, path,
+                                    secure, str(expires), name,
+                                    str(c.get("value", ""))]))
+        return lines
+
+    @classmethod
+    def netscape_file(cls, website: str) -> str:
+        """返回 website 的 Netscape 格式 cookies.txt 路径（按需生成并跟随刷新）。
+
+        you-get / yt-dlp 等命令行工具的 --cookies 参数只认 Netscape 格式；
+        本方法把 Selenium JSON 存储导出为 BASEPATH/datas/cookies/netscape/
+        <website>.txt：文件缺失或早于源 JSON 时自动重新导出（临时文件原子
+        替换，调度线程并发调用安全）。返回的是框架管理的持久文件，脚本直接
+        把路径拼进命令行即可，无需自行清理。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            str: 可直接传给 CLI 工具 --cookies 的 cookies.txt 路径。
+
+        Raises:
+            CookieNotFoundError: 未保存 cookie 或 cookie 文件为空（与 get 一致）。
+        """
+        source = cls._cookie_file(website)
+        cookies = cls.get(website)  # 复用 get：统一处理缺失/空文件的报错
+        target = cls._netscape_path(website)
+        if (os.path.exists(target)
+                and os.path.getmtime(target) >= os.path.getmtime(source)):
+            return target
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        tmp_path = target + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            f.write("\n".join(cls.netscape_lines(cookies)) + "\n")
+        os.replace(tmp_path, target)
+        logger.info(f"已导出 {website} 的 Netscape cookies.txt: {target}")
+        return target
 
     @classmethod
     def exists(cls, website: str) -> bool:
@@ -118,6 +216,9 @@ class CookieManager:
         path = cls._cookie_file(website)
         if os.path.exists(path):
             os.remove(path)
+            export = cls._netscape_path(website)
+            if os.path.exists(export):
+                os.remove(export)
             logger.info(f"已删除 {website} 的 cookie: {path}")
             return True
         return False

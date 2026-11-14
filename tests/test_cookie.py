@@ -1,5 +1,8 @@
-"""Cookie 管理与登录代理端点测试：存取、HTML 同源改写、保存/删除。
+"""Cookie 管理与登录代理端点测试：存取、HTML 同源改写、保存/删除、Netscape 导出。
 """
+import os
+import time
+
 import pytest
 import requests
 from flask import Flask
@@ -53,6 +56,71 @@ def test_cookie_manager_save_get_header_delete():
     assert CookieManager.delete("pixiv") is True
     assert CookieManager.delete("pixiv") is False
     assert CookieManager.exists("pixiv") is False
+
+
+def test_cookie_file_and_netscape_export(tmp_path):
+    """cookie_file 路径暴露与 Netscape 导出：按需生成、内容正确、跟随源刷新、删除联动。"""
+    cookies_root = os.path.join(str(tmp_path), "datas", "cookies")
+    assert CookieManager.exists("pixiv") is False
+    with pytest.raises(CookieNotFoundError):
+        CookieManager.netscape_file("pixiv")
+
+    cookies = [
+        {"name": "SESSDATA", "value": "s1", "domain": ".bilibili.com",
+         "path": "/", "expires": None, "secure": True},
+        {"name": "bad", "value": "no-domain"},  # 缺 domain，导出时跳过
+        {"name": "buvid", "value": "b1", "domain": "www.bilibili.com",
+         "path": "/x", "expires": 1900000000, "secure": False},
+    ]
+    assert CookieManager.save("pixiv", cookies) == 3
+    assert CookieManager.cookie_file("pixiv") == os.path.join(cookies_root, "pixiv.json")
+
+    txt = CookieManager.netscape_file("pixiv")
+    assert txt == os.path.join(cookies_root, "netscape", "pixiv.txt")
+    lines = open(txt, encoding="utf-8").read().splitlines()
+    assert lines[0] == "# Netscape HTTP Cookie File"
+    assert lines[1] == f".bilibili.com\tTRUE\t/\tTRUE\t{CookieManager.FAR_FUTURE_EXPIRY}\tSESSDATA\ts1"
+    assert lines[2] == f"www.bilibili.com\tFALSE\t/x\tFALSE\t1900000000\tbuvid\tb1"
+
+    # status() 不受 netscape 导出子目录影响
+    rows = CookieManager.status()
+    assert [r["website"] for r in rows] == ["pixiv"]
+
+    # 源 JSON 更新后（mtime 变化）自动重新导出：先把导出文件的时间戳拨旧
+    stale = time.time() - 10
+    os.utime(txt, (stale, stale))
+    CookieManager.save("pixiv", [
+        {"name": "SESSDATA", "value": "s2", "domain": ".bilibili.com",
+         "path": "/", "expires": None, "secure": False},
+    ])
+    lines = open(CookieManager.netscape_file("pixiv"), encoding="utf-8").read().splitlines()
+    assert lines[1] == f".bilibili.com\tTRUE\t/\tFALSE\t{CookieManager.FAR_FUTURE_EXPIRY}\tSESSDATA\ts2"
+
+    # 删除 cookie 时联动清理导出文件
+    CookieManager.delete("pixiv")
+    assert os.path.exists(txt) is False
+    assert CookieManager.exists("pixiv") is False
+
+
+def test_netscape_export_empty_cookies():
+    """cookie 文件为空时 Netscape 导出与 get 一样报 CookieNotFoundError。"""
+    CookieManager.save("pixiv", [])
+    with pytest.raises(CookieNotFoundError):
+        CookieManager.netscape_file("pixiv")
+
+
+def test_netscape_lines_conversion():
+    """netscape_lines 纯转换：任意 Selenium 格式列表 → Netscape 行（内存传入 cookie 的临时导出用）。"""
+    lines = CookieManager.netscape_lines([
+        {"name": "a", "value": "1", "domain": ".example.com",
+         "path": "/", "expires": None, "secure": True},
+        {"name": "bad"},                       # 缺 domain，跳过
+        {"name": "b", "value": "2", "domain": "example.com"},  # path/secure/expires 全走默认
+    ])
+    assert lines[0] == "# Netscape HTTP Cookie File"
+    assert lines[1] == f".example.com\tTRUE\t/\tTRUE\t{CookieManager.FAR_FUTURE_EXPIRY}\ta\t1"
+    assert lines[2] == f"example.com\tFALSE\t/\tFALSE\t{CookieManager.FAR_FUTURE_EXPIRY}\tb\t2"
+    assert len(lines) == 3
 
 
 def test_rewrite_html_makes_same_origin(client):

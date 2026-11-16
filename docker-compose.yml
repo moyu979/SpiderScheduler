@@ -6,6 +6,11 @@ services:
     ports:
       # 左侧宿主端口按需调整；改端口需同步 /data/confs/network.yaml 的 rest_api_port
       - "8300:8300"
+    environment:
+      # 每次容器启动（含宿主机重启、手动 restart）先从 GitHub main 拉最新
+      # 代码再启动；拉取/依赖安装失败自动沿用现有代码，不影响可用性。
+      # 可选 GIT_BRANCH 覆盖跟踪分支；置 0 关闭自动更新。
+      AUTO_UPDATE: "1"
     volumes:
       # 全部运行数据（配置/数据库/cookie/下载文件）都在这个卷里
       - spider-data:/data

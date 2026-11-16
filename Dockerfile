@@ -1,6 +1,10 @@
 # SpiderScheduler 部署镜像
 #
-# 构建：  docker build -t spiderscheduler .
+# 构建：  docker compose build
+#   镜像内代码不再来自构建目录，而是构建时从 GitHub main 拉取（匿名可读，
+#   REPO_URL 可覆盖）。配合 AUTO_UPDATE=1（docker-compose.yml 已开），每次
+#   容器启动先拉最新代码再启动；拉取/依赖安装失败自动降级沿用现有代码，
+#   服务不因更新失败而不可用。
 # 运行：  docker run -d --name spider -p 8300:8300 -v spider-data:/data spiderscheduler
 #   或用 docker compose up -d（见 docker-compose.yml）
 #
@@ -14,18 +18,25 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=Asia/Shanghai \
     BASEPATH=/data
 
-# tzdata：让日志时间戳使用本地时区
+# git：构建时拉代码 + 运行时 AUTO_UPDATE 增量更新
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
+    && apt-get install -y --no-install-recommends tzdata git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# 依赖层独立：requirements 不变的提交重建镜像时缓存直接复用
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
-COPY src/ src/
+# 代码来自 GitHub main：/app 已含 requirements.txt 不能 clone，用
+# init+fetch+reset 镜像远端；基线依赖哈希落盘供 entrypoint 增量判断
+ARG REPO_URL=https://github.com/moyu979/SpiderScheduler.git
+RUN git init -b main /app \
+    && git remote add origin "$REPO_URL" \
+    && git fetch --depth 1 origin main \
+    && git reset --hard FETCH_HEAD \
+    && md5sum requirements.txt | cut -d' ' -f1 > .req_hash
 
 # 非 root 运行
 RUN useradd --create-home appuser \
@@ -42,4 +53,6 @@ STOPSIGNAL SIGINT
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/', timeout=3)" || exit 1
 
-CMD ["python", "main.py"]
+# entrypoint.sh 随代码仓库分发（见文件头）：exec 后 python 为 PID 1，
+# SIGINT 直达 main.py，优雅退出语义不变
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]

@@ -33,6 +33,10 @@ docker compose up -d --build
 ```
 
 - All data lives in the named volume `spider-data` at `/data` (BASEPATH inside the container);
+- Auto-update: `AUTO_UPDATE=1` (default on) — on every container start (host reboot,
+  manual restart included) the entrypoint pulls the latest code from GitHub main
+  first; if the pull or dependency install fails it falls back to the existing
+  code and keeps serving. Set to `0` to disable; `GIT_BRANCH` overrides the branch;
 - `docker stop` triggers a graceful shutdown (waits for in-flight downloads, 1 min grace);
 - Edit config at `/data/confs/*.yaml` in the volume (hot-reloaded), or online via the System tab.
 

@@ -31,6 +31,9 @@ docker compose up -d --build
 ```
 
 - 数据全部在命名卷 `spider-data` 的 `/data`（容器内 BASEPATH）；
+- 自动更新：`AUTO_UPDATE=1`（默认开启）——每次容器启动（含宿主机重启、
+  手动 restart）先从 GitHub main 拉最新代码再启动；拉取或依赖安装失败
+  自动沿用现有代码，服务不受影响。置 `0` 关闭，`GIT_BRANCH` 可覆盖分支；
 - `docker stop` 触发优雅退出（等待下载任务收尾，宽限期 1 分钟）；
 - 改配置直接编辑卷内 `/data/confs/*.yaml`（热重载生效），或在系统页在线编辑。
 

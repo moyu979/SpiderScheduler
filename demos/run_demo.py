@@ -7,10 +7,10 @@
 收到了对应 cookie（站点把收到的 Cookie 回显在响应头/正文里）：
 
     [一] 文件传入 —— CookieManager.save() 把 cookie 落盘到
-                    <临时 base_path>/datas/cookies/demo.json（等价于前端
+                    <临时 base_path>/datas/meta/demo/cookie.json（等价于前端
                     Cookie 页登录代理的产物），脚本经框架注入的
                     cookie_manager 读取。实例化与注入方式完全照抄框架：
-                    src/service/updater.py:276 / src/service/downloader.py:473。
+                    src/service/updater.py（_update_position） / src/service/downloader.py（_run_download_task）。
     [二] 内存传入 —— 不读写任何 cookie 文件：updater 经 usr["cookies"]、
                     downloader 经 download_info["cookies"] 直接拿到 cookie。
     [三] 内存注入 —— 用 InMemoryCookieManager 顶替 CookieManager 注入
@@ -135,7 +135,7 @@ def run_updater(author_id, cookies=None, cookie_manager=None, log=None):
         usr["cookies"] = cookies  # 内存传入入口：框架快照无此键，仅直接实例化时有效
     updater = DemoUpdateUser(usr, log)
     if cookie_manager is not None:
-        updater.cookie_manager = cookie_manager  # ← 框架注入点（updater.py:276）
+        updater.cookie_manager = cookie_manager  # ← 框架注入点（updater.py:_update_position）
     return list(updater)
 
 
@@ -145,11 +145,17 @@ def run_downloader(work_info, download_root, download_info=None, cookie_manager=
     os.makedirs(work_dir, exist_ok=True)  # 框架会先建好本任务专属目录
     dl = DemoDownloadWork(work_info=work_info, download_path=work_dir,
                           download_info=download_info)
-    dl.logger = log                       # ← 框架注入点（downloader.py:471-473）
+    dl.logger = log                       # ← 框架注入点（downloader.py:_run_download_task）
     dl.config_manager = None
     if cookie_manager is not None:
-        dl.cookie_manager = cookie_manager  # ← 框架注入点（downloader.py:473）
-    return dl.download_it()
+        dl.cookie_manager = cookie_manager  # ← 框架注入点（downloader.py:_run_download_task）
+    result = dl.download_it()
+    # download_it 契约：产物路径相对 download_path（或绝对路径）——框架按
+    # 相对层级解析后做缓存交付，demo 侧照做，把相对路径解析回绝对路径
+    path = result["path"] if isinstance(result, dict) else result
+    if path and not os.path.isabs(path):
+        path = os.path.join(work_dir, path)
+    return path
 
 
 def cookie_reached(prefix, marker):
@@ -169,19 +175,18 @@ def cookie_reached(prefix, marker):
 # ---------------- 三个场景 ----------------
 
 def scenario_1_file(base_url, log):
-    """文件传入：cookie 落盘为 <base_path>/datas/cookies/demo.json，
+    """文件传入：cookie 落盘为 <base_path>/datas/meta/demo/cookie.json，
     脚本通过框架注入的 CookieManager 读取。"""
     from src.config.config import ConfigManager
-    from src.config.paths import cookies_path
-    from src.utils.cookie_manager import CookieManager
+    from src.utils.meta import CookieManager
 
     # 独立临时工作目录，等价于一次干净的部署（与 tests 的做法一致）
     work_root = Path(tempfile.mkdtemp(prefix="spider_demo_file_"))
     ConfigManager.base_path = str(work_root)
 
     # ① cookie 落盘 —— 正式部署里这一步由前端 Cookie 页的登录代理完成，
-    #    产物是 BASEPATH/datas/cookies/<website>.json（Selenium 格式）
-    cookie_file = os.path.join(cookies_path(), "demo.json")
+    #    产物是 BASEPATH/datas/meta/<website>/cookie.json（Selenium 格式）
+    cookie_file = CookieManager.cookie_file("demo")
     CookieManager.save("demo", [DEMO_COOKIE])
     log.info("cookie 文件已生成: %s", cookie_file)
     log.info("文件内容等价请求头: %s", CookieManager.get_header("demo"))

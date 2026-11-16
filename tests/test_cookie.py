@@ -9,7 +9,7 @@ from flask import Flask
 
 from src.config.config import ConfigManager
 from src.server.apis.cookie_api import CookieApi, _rewrite_html, _SESSIONS
-from src.utils.cookie_manager import CookieManager, CookieNotFoundError
+from src.utils.meta import CookieManager, CookieNotFoundError, MetaManager
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +60,7 @@ def test_cookie_manager_save_get_header_delete():
 
 def test_cookie_file_and_netscape_export(tmp_path):
     """cookie_file 路径暴露与 Netscape 导出：按需生成、内容正确、跟随源刷新、删除联动。"""
-    cookies_root = os.path.join(str(tmp_path), "datas", "cookies")
+    cookies_root = os.path.join(str(tmp_path), "datas", "meta")
     assert CookieManager.exists("pixiv") is False
     with pytest.raises(CookieNotFoundError):
         CookieManager.netscape_file("pixiv")
@@ -73,16 +73,16 @@ def test_cookie_file_and_netscape_export(tmp_path):
          "path": "/x", "expires": 1900000000, "secure": False},
     ]
     assert CookieManager.save("pixiv", cookies) == 3
-    assert CookieManager.cookie_file("pixiv") == os.path.join(cookies_root, "pixiv.json")
+    assert CookieManager.cookie_file("pixiv") == os.path.join(cookies_root, "pixiv", "cookie.json")
 
     txt = CookieManager.netscape_file("pixiv")
-    assert txt == os.path.join(cookies_root, "netscape", "pixiv.txt")
+    assert txt == os.path.join(cookies_root, "pixiv", "cookies.txt")
     lines = open(txt, encoding="utf-8").read().splitlines()
     assert lines[0] == "# Netscape HTTP Cookie File"
     assert lines[1] == f".bilibili.com\tTRUE\t/\tTRUE\t{CookieManager.FAR_FUTURE_EXPIRY}\tSESSDATA\ts1"
     assert lines[2] == f"www.bilibili.com\tFALSE\t/x\tFALSE\t1900000000\tbuvid\tb1"
 
-    # status() 不受 netscape 导出子目录影响
+    # status() 只认站点目录下的 cookie.json（同目录其他文件不计入）
     rows = CookieManager.status()
     assert [r["website"] for r in rows] == ["pixiv"]
 
@@ -121,6 +121,16 @@ def test_netscape_lines_conversion():
     assert lines[1] == f".example.com\tTRUE\t/\tTRUE\t{CookieManager.FAR_FUTURE_EXPIRY}\ta\t1"
     assert lines[2] == f"example.com\tFALSE\t/\tFALSE\t{CookieManager.FAR_FUTURE_EXPIRY}\tb\t2"
     assert len(lines) == 3
+
+
+def test_cookie_delete_spares_other_meta_files(tmp_path):
+    """delete("cookie*") 只删 cookie 产物；站点 meta 目录内其他文件不受影响。"""
+    CookieManager.save("pixiv", [{"name": "a", "value": "b"}])
+    MetaManager.save_file("pixiv", "session.json", b"keep-me")
+
+    assert CookieManager.delete("pixiv") is True
+    assert CookieManager.exists("pixiv") is False
+    assert MetaManager.read_file("pixiv", "session.json") == b"keep-me"
 
 
 def test_rewrite_html_makes_same_origin(client):

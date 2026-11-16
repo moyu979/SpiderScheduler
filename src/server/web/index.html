@@ -157,7 +157,8 @@
 
   <div class="card filters hidden" id="filters-cookie">
     <span style="color:var(--muted)">各站点的登录 cookie 与入口地址。未配置时点"去登录"，在弹出的目标站登录页完成登录后点"完成并保存"，
-      cookie 将保存到工作目录供脚本按 website 取用；站点入口支持在线增改（写回 websites.yaml）。</span>
+      cookie 将保存到工作目录供脚本按 website 取用；"上传Meta"可把 session 等运行态文件存入该站点的 meta 目录（datas/meta/&lt;website&gt;/），供脚本按 website 取用；
+      站点入口支持在线增改（写回 websites.yaml）。</span>
     <button class="ghost" id="btn-add-site">添加站点</button>
     <button class="ghost" id="c-reset">刷新</button>
   </div>
@@ -487,6 +488,7 @@ function renderCookies(rows) {
       <td class="actions">
         <button class="ghost" data-cact="login" data-site="${esc(r.website)}">去登录</button>
         ${r.hasCookie ? `<button class="ghost" data-cact="delete" data-site="${esc(r.website)}">删除</button>` : ''}
+        <button class="ghost" data-cact="meta" data-site="${esc(r.website)}">上传Meta</button>
         <button class="ghost" data-wact="edit" data-site="${esc(r.website)}">编辑地址</button>
         <button class="ghost" data-wact="delete" data-site="${esc(r.website)}">删除站点</button>
       </td>
@@ -589,6 +591,24 @@ $('table').addEventListener('click', async (e) => {
         if (!resp.ok || data.success === false) throw new Error(data.error || `HTTP ${resp.status}`);
         loadCookies();
       } catch (err) { showError(err.message); cbtn.disabled = false; }
+    } else if (cbtn.dataset.cact === 'meta') {
+      // 上传 meta 文件：文件名即 meta 存储名（服务端白名单校验），后端原子落盘
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+        try {
+          const fd = new FormData();
+          fd.append('file', file);
+          const resp = await fetch(`/api/meta/${encodeURIComponent(site)}/file/${encodeURIComponent(file.name)}`,
+            { method: 'POST', body: fd });
+          const data = await resp.json().catch(() => ({ success: false, error: '响应解析失败' }));
+          if (!resp.ok || data.success === false) throw new Error(data.error || `HTTP ${resp.status}`);
+          alert(`已上传 meta 文件「${file.name}」到站点「${site}」`);
+        } catch (err) { showError(err.message); }
+      };
+      input.click();
     }
     return;
   }

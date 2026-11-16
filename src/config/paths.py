@@ -6,9 +6,9 @@ BASEPATH 环境变量覆盖）派生。其余模块一律通过本模块取路�
 
 路径分组：
 - 配置与脚本：config_path / 各脚本来源（含多文件分发的站点目录）；
-- 运行数据：db_path / log_path / cookies_path / download_path / download_cache_path。
-  （下载产物与缓存的根路径优先取 download.yaml 的 site.default 段配置，
-  未配置时由这两个函数给出基于 BASEPATH 的兜底值。）
+- 运行数据：db_path / log_path / meta_path / download_path / download_cache_path
+  / update_data_path。（下载产物与缓存、更新数据的根路径优先取对应 yaml 的
+  site.default 段配置，未配置时由这些函数给出基于 BASEPATH 的兜底值。）
 """
 
 import glob
@@ -89,9 +89,14 @@ def log_path() -> str:
     return os.path.join(base_path(), "datas", "log")
 
 
-def cookies_path() -> str:
-    """登录 cookie 存储目录（BASEPATH/datas/cookies）。"""
-    return os.path.join(base_path(), "datas", "cookies")
+def meta_path() -> str:
+    """站点 meta 存储根目录（BASEPATH/datas/meta，每站点一个子目录）。
+
+    cookie（<website>/cookie.json）、Netscape 导出（<website>/cookies.txt）
+    与脚本/用户上传的任意站点运行态文件（session 等）都放这里；文件机制
+    见 src/utils/meta/meta_manager.py。
+    """
+    return os.path.join(base_path(), "datas", "meta")
 
 
 def download_path() -> str:
@@ -106,3 +111,14 @@ def download_path() -> str:
 def download_cache_path() -> str:
     """下载缓存中转目录的兜底值（BASEPATH/datas/download_cache），优先级同上。"""
     return os.path.join(base_path(), "datas", "download_cache")
+
+
+def update_data_path() -> str:
+    """更新脚本数据落盘根的兜底值（BASEPATH/datas/update_data）。
+
+    优先级：update.yaml 的 site.update_data_path 配置（支持 ${BASE_PATH}）>
+    本函数；配置缺省时代码兜底，保证三层配置全缺也不崩。站点根为
+    <本目录>/<website>/，内部结构（作者子目录、站点级文件）由更新脚本
+    自定（经 ScriptTools.data_root() 取用）。
+    """
+    return os.path.join(base_path(), "datas", "update_data")

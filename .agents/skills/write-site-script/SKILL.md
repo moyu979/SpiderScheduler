@@ -70,10 +70,17 @@ selenium 就必须声明。
 
 **CookieManager**：`exists(website)` / `get_header(website)`（requests 的 Cookie
 头字符串）/ `get(website)`（Selenium 逐条 `add_cookie` 用的 list[dict]）/
-`save` / `delete` / `status()`；CLI 工具场景用 `netscape_file(website)`
-（Netscape cookies.txt 导出路径，见下文）、`netscape_lines(cookies)`（纯转换，
-内存传入 cookie 的临时导出用）、`cookie_file(website)`（原始 JSON 路径，极少
-用）。cookie 文件由登录代理落盘在 `BASEPATH/datas/cookies/<website>.json`。
+`save` / `delete(website, pattern="cookie*")` / `status()`；CLI 工具场景用
+`netscape_file(website)`（Netscape cookies.txt 导出路径，见下文）、
+`netscape_lines(cookies)`（纯转换，内存传入 cookie 的临时导出用）、
+`cookie_file(website)`（原始 JSON 路径，极少用）。cookie 文件由登录代理落盘在
+`BASEPATH/datas/meta/<website>/cookie.json`，Netscape 导出在同目录 `cookies.txt`。
+
+每个站点还有一个 meta 目录 `BASEPATH/datas/meta/<website>/`（cookie 所在），
+可存放任意站点运行态文件（session 等）：**MetaManager**（`src/utils/meta`，
+字节级）提供 `file_path(website, name)` / `exists` / `save_file(website, name,
+bytes)`（原子写）/ `read_file` / `list_files(website)` / `delete(website,
+pattern)`（fnmatch 通配，如 `"cookie*"`）；站点名与文件名一律白名单校验。
 
 **ScriptTools**：
 
@@ -81,6 +88,7 @@ selenium 就必须声明。
 |---|---|
 | `log(level, message)` | 以站点上下文写日志（`"info"` / `"warning"` / …） |
 | `site_origin()` | websites.yaml 中本站点入口地址（无配置抛 ScriptToolsError） |
+| `data_root()` | 本站点更新数据落盘根 `<update_data_path>/<website>/`（懒创建）；更新脚本把位点级/站点级的文本类数据写这里，内部结构自定 |
 | `get_proxies()` | 可直接传给 requests 的代理字典；未启用为 `{}`（可不加判断直接传） |
 | `get_driver(...)` | 携带本站点登录态与代理的 Chrome；用完必须 `driver.quit()`；需 `# requirements: selenium` |
 | `register(name, fn)` | 动态注册扩展工具，之后经 `self.tools.<name>(...)` 调用 |

@@ -1,10 +1,10 @@
-"""查询 API：为前端提供作品/用户的组合筛选查询与统计。
+"""查询 API：为前端提供作品/位点的组合筛选查询与统计。
 
 筛选维度可任意组合：
 - website：逗号分隔多选
 - state：逗号分隔多选；特殊值 none 表示 state 为 NULL（旧数据）
 - 作者（works）：authorId，经 upload 关联（EXISTS，不改变行数）
-- 日期：works 可选 upTime/downloadDate，users 固定 addTime；值按字符串比较，
+- 日期：works 可选 upTime/downloadDate，positions 固定 addTime；值按字符串比较，
   对 ISO 格式（downloadDate/addTime 及部分站点的 upTime）可靠
 - keyword：works 匹配 title/workNumber，positions 匹配 authorId
 - 分页：limit（默认 50，上限 500）/ offset；排序字段走白名单

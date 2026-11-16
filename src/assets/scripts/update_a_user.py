@@ -28,7 +28,7 @@
 
 cookie 的两种传入方式（优先级：内存 > 文件 > 无）：
 1. 文件传入（调度流默认）：cookie_manager 按 website 读
-   BASEPATH/datas/cookies/<website>.json；requests 直连用
+   BASEPATH/datas/meta/<website>/cookie.json；requests 直连用
    get_header(website)，Selenium 用 get(website) 逐条 add_cookie 或直接
    tools.get_driver()（cookie/代理/UA 全自动）；
 2. 内存传入（把脚本当库直接实例化时）：usr["cookies"] 携带 cookie——该键
@@ -37,7 +37,9 @@ cookie 的两种传入方式（优先级：内存 > 文件 > 无）：
 
 tools（src/service/script_tools.py，与位点站点绑定）：tools.logger、
 tools.get_driver()（自动应用 system.yaml 代理）、tools.get_proxies()、
-tools.site_origin()、tools.register(name, fn)。
+tools.site_origin()、tools.data_root()（本站点更新数据落盘根
+<update_data_path>/<website>/，位点级/站点级的文本类数据写这里，
+update.yaml 的 update_data_path 可配）、tools.register(name, fn)。
 
 依赖声明：脚本头部写 "# requirements: 包名[版本约束]"，框架加载前自动安装。
 """

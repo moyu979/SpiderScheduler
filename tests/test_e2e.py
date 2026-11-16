@@ -28,7 +28,7 @@ from src.config.config import ConfigManager
 from src.service.dispatcher import ScriptDispatcher
 from src.service.downloader import Downloader
 from src.service.updater import Updater
-from src.utils.cookie_manager import CookieManager
+from src.utils.meta import CookieManager
 from src.utils.database import database as db_module
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import Base, PublishPos, Upload, Works

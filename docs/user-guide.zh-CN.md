@@ -42,10 +42,12 @@ docker/                          ← BASEPATH
 ├── scripts/                     你的两个用户脚本
 └── datas/
     ├── spider.db                SQLite 主库（位点/作品/关联/迁移版本）
-    ├── cookies/<website>.json   各站点登录 cookie
+    ├── meta/<website>/          各站点运行态文件（cookie.json / cookies.txt /
+    │                            上传的 session 等，经 MetaManager 管理）
     ├── log/                     按月轮转日志
     ├── download/                下载产物（最终保存路径）
-    └── download_cache/          下载缓存中转目录
+    ├── download_cache/          下载缓存中转目录
+    └── update_data/             更新脚本数据落盘根（update_data_path 可配）
 ```
 
 备份 = 备份整个工作目录；迁移机器 = 拷贝整个目录。
@@ -80,9 +82,12 @@ docker/                          ← BASEPATH
 1. Cookie 页每个站点行点 **去登录**，会打开一个包装页：顶栏（完成并保存 / 取消）+ 下方是
    **目标站原样的登录页**（通过同源代理转发）。
 2. 在页面里真实登录。整个过程的目标站 cookie 由后端自动捕获，不依赖浏览器保存。
-3. 点 **完成并保存**，cookie 落盘为 `datas/cookies/<website>.json`，自动跳回前端首页。
+3. 点 **完成并保存**，cookie 落盘为 `datas/meta/<website>/cookie.json`，自动跳回前端首页。
 4. 已有 cookie 时再点"去登录"= 带着旧 cookie 进登录页，可用于刷新过期凭证；
-   **删除**则清掉该站点的 cookie 文件。
+   **删除**则清掉该站点的 cookie 文件（cookie.json 与 Netscape 导出 cookies.txt，
+   站点 meta 目录内的其他文件不受影响）。
+5. **上传Meta** 把任意文件（session、storageState 等）存入该站点的 meta 目录
+   `datas/meta/<website>/`（原子写入、文件名白名单校验），供脚本按 website 取用。
 
 脚本里通过注入的 `cookie_manager` 取用（见 §4）。
 
@@ -175,7 +180,9 @@ site:
 结构与 download.yaml 完全一致：根键 `do_update` 总开关；`site.default` 放
 `update_thread`（线程数）/ `update_interval`（轮间隔）/ `commit_interval`
 （相邻**位点**之间的提交间隔，错峰）/ `page_interval`（同一位点内相邻两页的
-抓取间隔，由框架解析后灌给 updater 脚本——分页由脚本控制，纯 API 站点可忽略），
+抓取间隔，由框架解析后灌给 updater 脚本——分页由脚本控制，纯 API 站点可忽略）/
+`update_data_path`（更新脚本数据落盘根，脚本经 `tools.data_root()` 取
+`<根>/<站点>/`，位点级/站点级的文本类数据都写这里），
 `site.<website>` 按站点覆盖（查更新也是爬页面，按站点限流）。
 
 ### 3.3 其他配置段
@@ -234,6 +241,10 @@ class DownloadWork:
 | `GET /api/cookie/status` | 站点 cookie 状态 |
 | `GET /api/cookie/<w>/login_page` | 登录包装页 |
 | `POST /api/cookie/<w>/save` / `cancel`、`DELETE /api/cookie/<w>` | 保存 / 放弃 / 删除 |
+| `GET /api/meta/<w>` | 站点 meta 文件列表（name/size/updateTime） |
+| `GET /api/meta/<w>/file/<name>` | 读取 meta 文件原始字节 |
+| `POST /api/meta/<w>/file/<name>` | 上传/覆盖 meta 文件（multipart `file` 字段或原始字节 body；原子写） |
+| `DELETE /api/meta/<w>/<pattern>` | 按通配删除 meta 文件（如 `cookie*`） |
 | `GET /api/system/scripts` · `POST .../reload` | 路由表 · 热重载脚本 |
 | `GET /api/system/scripts/<kind>/source` · `POST .../upload` | 查看脚本 · 上传（multipart：`kind`+`file`） |
 | `GET /api/system/config` · `GET/PUT /api/system/config/<段>/raw` · `POST /api/system/config/reload` | 配置查看 / YAML 读写 / 整体重载 |

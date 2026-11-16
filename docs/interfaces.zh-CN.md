@@ -53,22 +53,35 @@
 |---|---|
 | `log(level, message)` | 以站点上下文写日志（`"info"` / `"warning"` / …） |
 | `site_origin()` | websites.yaml 中本站点的入口地址（无配置抛 `ScriptToolsError`） |
+| `data_root()` | 本站点的更新数据落盘根 `<update_data_path>/<website>/`（懒创建；update.yaml `site.update_data_path` > 代码兜底） |
 | `proxy_url()` | system.yaml 配置的代理地址；未启用返回 `None` |
 | `get_proxies()` | 可直接传给 requests 的代理字典；未启用返回 `{}` |
 | `get_driver(...)` | 携带本站点登录态与代理的 Chrome（Selenium）；用完须 `driver.quit()`；需 `# requirements: selenium` |
 | `register(name, fn)` | 动态注册扩展工具，之后可经 `self.tools.<name>(...)` 调用 |
 
-`CookieManager`（`src/utils/cookie_manager.py`）公开接口：`exists(website)` /
-`get(website)`（Selenium 逐条 `add_cookie` 用）/ `get_header(website)`（requests
-Cookie 头用）/ `save(website, cookies)` / `delete(website)` / `status()`（全部
-cookie 概览，供 Cookie 页展示）。`cookie_file(website)` 暴露原始存储路径
-（Selenium JSON）。you-get / yt-dlp 等只认 Netscape `cookies.txt` 的命令行工具
-用 `netscape_file(website)`：返回框架管理的导出路径
-`BASEPATH/datas/cookies/netscape/<website>.txt`——按需生成、源 JSON 更新后自动
+每个站点有一个 meta 目录 `BASEPATH/datas/meta/<website>/`（扁平无子目录），
+存放站点运行态文件——cookie、Netscape 导出与脚本/用户上传的任意文件
+（session、storageState 等）。
+
+`MetaManager`（`src/utils/meta/meta_manager.py`）是该目录的字节级存取基座：
+`file_path(website, name)` / `exists` / `save_file(website, name, bytes)`（原子
+写）/ `read_file` / `list_files(website)` / `delete(website, pattern)`（fnmatch
+通配，如 `"cookie*"`）。站点名与文件名一律白名单校验，杜绝路径穿越；REST
+端点 `/api/meta/...` 见 `src/server/apis/meta_api.py`（前端 Cookie 页
+"上传Meta"按钮也走它）。
+
+`CookieManager`（`src/utils/meta/cookie_manager.py`，MetaManager 之上的 cookie
+封装）公开接口：`exists(website)` / `get(website)`（Selenium 逐条 `add_cookie`
+用）/ `get_header(website)`（requests Cookie 头用）/ `save(website, cookies)` /
+`delete(website, pattern="cookie*")` / `status()`（全部 cookie 概览，供 Cookie
+页展示）。`cookie_file(website)` 暴露原始存储路径。you-get / yt-dlp 等只认
+Netscape 格式的命令行工具用 `netscape_file(website)`：返回框架管理的导出路径
+`BASEPATH/datas/meta/<website>/cookies.txt`——按需生成、源 JSON 更新后自动
 重导，路径直接拼进 `--cookies` 即可，脚本无需自建临时文件；
 `netscape_lines(cookies)` 把任意 Selenium 格式列表转成 Netscape 文本行（内存
 传入 cookie 的临时导出用）。cookie 文件在
-`BASEPATH/datas/cookies/<website>.json`，由登录代理落盘。
+`BASEPATH/datas/meta/<website>/cookie.json`，由登录代理落盘；默认删除模式
+`"cookie*"` 可把两个 cookie 产物一并清掉，meta 目录内其他文件不受影响。
 
 ### 2.3 模板与示例
 
@@ -186,7 +199,8 @@ Selenium `list[dict]`、`{name: value}` dict、`"k=v; k=v"` 字符串；该键�
 
 **`logging`** —— 框架日志对象（`SpiderLogger`），用法同 `logger.info(...)`。
 
-**注入属性**：`cookie_manager`（CookieManager 类）、`tools`（ScriptTools）、
+**注入属性**：`cookie_manager`（CookieManager 类）、`tools`（ScriptTools，其
+`data_root()` 给出本站点的更新数据落盘根）、
 `page_interval`（翻页间隔秒数，来自 `site.<website>.page_interval`，框架解析后
 灌入；翻页由脚本控制，请在两次取页之间 sleep 本值，纯 API 站点可忽略）。
 
@@ -222,6 +236,7 @@ Selenium `list[dict]`、`{name: value}` dict、`"k=v; k=v"` 字符串；该键�
 | `update_interval` | `21600` | 每轮间隔（秒，±10% 抖动），`-1` 持续更新 |
 | `commit_interval` | `8` | 相邻位点任务的提交间隔（秒，错峰） |
 | `page_interval` | `5` | 位点内翻页间隔（秒），框架灌给脚本 |
+| `update_data_path` | `datas/update_data` | 更新脚本数据落盘根（`${BASE_PATH}` 可用），脚本经 `tools.data_root()` 取 `<根>/<website>/`，位点级/站点级的文本类数据都写这里，内部结构由脚本自定 |
 
 ## 5. 调度服务公共接口
 

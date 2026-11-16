@@ -8,8 +8,8 @@
     cookie jar（浏览器看到的全部是同源响应，天然绕开第三方 cookie 限制）；
   * 后续请求自动带上 jar 里的 cookie，登录流程的会话演化和真实浏览器一致；
   * HTML 做同源改写：绝对/协议相对/根相对地址改写到代理路径，并注入 <base>。
-- 用户登录完成后点包装页的"完成并保存"，jar 落盘为 datas/cookies/<website>.json，
-  之后脚本经 CookieManager 按 website 取用。
+- 用户登录完成后点包装页的"完成并保存"，jar 落盘为
+  datas/meta/<website>/cookie.json，之后脚本经 CookieManager 按 website 取用。
 
 局限（诚实声明）：只改写服务端返回的 HTML 文本；登录页若用 JS 拼绝对 URL 跳转、
 或依赖严格的 CSP/反代理检测，可能需要针对性处理。404 兜里带了一个 Referer 级
@@ -23,7 +23,7 @@ import requests
 from flask import Blueprint, Response, jsonify, request
 
 from src.config.config import config_manager
-from src.utils.cookie_manager import CookieManager
+from src.utils.meta import CookieManager
 from src.utils.logging.logger import SpiderLogger as logger
 
 # 转发给目标站的请求头白名单（Host/Cookie/压缩由代理自管）

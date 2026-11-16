@@ -61,24 +61,42 @@ Assigned by the framework **after** construction (do **not** read them in
 |---|---|
 | `log(level, message)` | log with site context (`"info"` / `"warning"` / …) |
 | `site_origin()` | the site's entry URL from websites.yaml (`ScriptToolsError` if unconfigured) |
+| `data_root()` | the site's update-data root `<update_data_path>/<website>/` (created on demand; update.yaml `site.update_data_path` > code fallback) |
 | `proxy_url()` | proxy address from system.yaml; `None` when disabled |
 | `get_proxies()` | proxy dict for requests; `{}` when disabled |
 | `get_driver(...)` | Chrome (Selenium) with the site's login cookies and proxy; call `driver.quit()` when done; needs `# requirements: selenium` |
 | `register(name, fn)` | register an extension tool, callable as `self.tools.<name>(...)` |
 
-`CookieManager` (`src/utils/cookie_manager.py`) public interface:
+Each site has a meta directory `BASEPATH/datas/meta/<website>/` (flat, no
+subdirectories) holding the site's runtime-state files — cookies, the Netscape
+export, and arbitrary files uploaded by scripts or users (sessions,
+storageState, …).
+
+`MetaManager` (`src/utils/meta/meta_manager.py`) is the byte-level storage
+primitive for that directory: `file_path(website, name)` / `exists` /
+`save_file(website, name, bytes)` (atomic write) / `read_file` /
+`list_files(website)` / `delete(website, pattern)` (fnmatch, e.g. `"cookie*"`).
+Site names and file names are whitelist-validated to prevent path traversal;
+REST endpoints `/api/meta/...` live in `src/server/apis/meta_api.py` (the
+Cookie tab's "上传Meta" button uses them too).
+
+`CookieManager` (`src/utils/meta/cookie_manager.py`, cookie wrapper on top of
+MetaManager) public interface:
 `exists(website)` / `get(website)` (for Selenium `add_cookie`) /
 `get_header(website)` (requests `Cookie` header) / `save(website, cookies)` /
-`delete(website)` / `status()` (overview of all cookies, for the Cookie tab).
+`delete(website, pattern="cookie*")` / `status()` (overview of all cookies, for
+the Cookie tab).
 `cookie_file(website)` exposes the raw storage path (Selenium JSON). For CLI
-tools that only read Netscape `cookies.txt` (you-get, yt-dlp, …),
+tools that only read Netscape format (you-get, yt-dlp, …),
 `netscape_file(website)` returns a framework-managed export at
-`BASEPATH/datas/cookies/netscape/<website>.txt` — generated on demand and
+`BASEPATH/datas/meta/<website>/cookies.txt` — generated on demand and
 refreshed automatically whenever the source JSON changes; pass the path
 straight to `--cookies`, no temp-file handling needed.
 `netscape_lines(cookies)` converts any Selenium-format cookie list to Netscape
 text lines (for temp-file export of memory-passed cookies). JSON files live at
-`BASEPATH/datas/cookies/<website>.json`, written by the login proxy.
+`BASEPATH/datas/meta/<website>/cookie.json`, written by the login proxy; the
+default delete pattern `"cookie*"` removes both cookie artifacts while leaving
+other meta files untouched.
 
 ### 2.3 Templates and Examples
 
@@ -209,7 +227,8 @@ key may carry cookies (Selenium `list[dict]`, `{name: value}` dict, or
 `logger.info(...)`.
 
 **Injected attributes**: `cookie_manager` (CookieManager class), `tools`
-(ScriptTools), `page_interval` (seconds between pages, parsed from
+(ScriptTools, whose `data_root()` returns the site's update-data root),
+`page_interval` (seconds between pages, parsed from
 `site.<website>.page_interval`; paging is script-controlled — sleep this value
 between fetches; pure-API sites may ignore it).
 
@@ -247,6 +266,7 @@ between fetches; pure-API sites may ignore it).
 | `update_interval` | `21600` | seconds between rounds (±10% jitter); `-1` = keep updating |
 | `commit_interval` | `8` | seconds between submitting successive positions (stagger) |
 | `page_interval` | `5` | seconds between pages within one position, fed to the script |
+| `update_data_path` | `datas/update_data` | root for update-script data files (`${BASE_PATH}` supported); scripts get `<root>/<website>/` via `tools.data_root()` — position-level or site-level text data goes here, internal layout is up to the script |
 
 ## 5. Scheduler Service Interfaces
 

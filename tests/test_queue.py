@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.config.config import ConfigManager, GetUnknownKey
-from src.utils.threadPool.threadPool import ThreadPool
+from src.utils.thread_pool.thread_pool import ThreadPool
 
 from src.service.downloader import Downloader
 from src.service.dispatcher import ScriptRouteError

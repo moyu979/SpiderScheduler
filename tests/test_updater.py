@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.config.config import ConfigManager
 from src.service.updater import Updater
-from src.utils.threadPool.threadPool import ThreadPool
+from src.utils.thread_pool.thread_pool import ThreadPool
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import Base, PublishPos, Works, Upload
 

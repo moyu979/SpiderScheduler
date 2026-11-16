@@ -44,10 +44,12 @@ docker/                          ← BASEPATH
 ├── scripts/                     your two user scripts
 └── datas/
     ├── spider.db                SQLite database (positions/works/links/schema version)
-    ├── cookies/<website>.json   per-site login cookies
+    ├── meta/<website>/          per-site runtime-state files (cookie.json /
+    │                            cookies.txt / uploaded sessions, via MetaManager)
     ├── log/                     monthly rotating logs
     ├── download/                final download destination
-    └── download_cache/          download cache staging area
+    ├── download_cache/          download cache staging area
+    └── update_data/             update-script data root (update_data_path)
 ```
 
 Backing up = copying this directory; moving hosts = copying this directory.
@@ -87,10 +89,14 @@ Login credentials per site:
    same-origin proxy).
 2. Log in as usual. Cookies set during the whole flow are captured by the backend, not the
    browser.
-3. Click **Save & finish** — cookies are persisted to `datas/cookies/<website>.json` and you
-   are returned to the app.
+3. Click **Save & finish** — cookies are persisted to `datas/meta/<website>/cookie.json`
+   and you are returned to the app.
 4. Clicking Login again with cookies present = re-login with the old session (useful to
-   refresh expired credentials); **Delete** removes the cookie file.
+   refresh expired credentials); **Delete** removes the cookie artifacts (cookie.json and
+   the Netscape export cookies.txt; other files in the site's meta directory are untouched).
+5. **Upload Meta** stores any file (sessions, storageState, …) in that site's meta
+   directory `datas/meta/<website>/` (atomic write, filename whitelist), consumable by
+   scripts per website.
 
 Scripts consume cookies via the injected `cookie_manager` (see §4).
 
@@ -195,7 +201,9 @@ Same structure as download.yaml: root key `do_update` master switch;
 interval) / `commit_interval` (submit stagger **between positions**) /
 `page_interval` (fetch interval **between pages within one position**, resolved
 by the framework and injected into the updater script — pagination is owned by
-the script; pure-API sites can ignore it); `site.<website>` overrides per site
+the script; pure-API sites can ignore it) /
+`update_data_path` (root for update-script data files; scripts get
+`<root>/<site>/` via `tools.data_root()`); `site.<website>` overrides per site
 (updates crawl the target site too — rate-limit per site).
 
 ### 3.3 Other Sections
@@ -257,6 +265,10 @@ Responses are `{"success": true/false, ...}`; entity identity is always `(id, we
 | `GET /api/cookie/status` | per-site cookie status |
 | `GET /api/cookie/<w>/login_page` | login wrapper page |
 | `POST /api/cookie/<w>/save` / `cancel`, `DELETE /api/cookie/<w>` | save / abandon / delete |
+| `GET /api/meta/<w>` | list the site's meta files (name/size/updateTime) |
+| `GET /api/meta/<w>/file/<name>` | read a meta file's raw bytes |
+| `POST /api/meta/<w>/file/<name>` | upload/overwrite a meta file (multipart `file` field or raw bytes body; atomic write) |
+| `DELETE /api/meta/<w>/<pattern>` | delete meta files by fnmatch pattern (e.g. `cookie*`) |
 | `GET /api/system/scripts` · `POST .../reload` | route table · hot-reload scripts |
 | `GET /api/system/scripts/<kind>/source` · `POST .../upload` | view a script · upload (multipart: `kind`+`file`) |
 | `GET /api/system/config` · `GET/PUT /api/system/config/<section>/raw` · `POST /api/system/config/reload` | list sections · read/write YAML · full reload |

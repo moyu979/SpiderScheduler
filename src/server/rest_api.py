@@ -16,6 +16,7 @@ from src.server.apis.download_api import DownloadApi
 from src.server.apis.update_api import UpdateApi
 from src.server.apis.query_api import QueryApi
 from src.server.apis.cookie_api import CookieApi
+from src.server.apis.meta_api import MetaApi
 from src.server.apis.script_api import ScriptApi
 from src.server.apis.config_api import ConfigApi
 from src.server.apis.website_api import WebsitesApi
@@ -40,7 +41,7 @@ class RestApiService:
         
         # 创建 Flask 应用
         self.app = Flask(__name__)
-        # 上传保护：脚本/表单请求体上限
+        # 上传保护：脚本/meta 文件/表单请求体上限
         self.app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
         
         # 获取配置
@@ -78,6 +79,7 @@ class RestApiService:
         update_api = UpdateApi()
         query_api = QueryApi()
         cookie_api = CookieApi()
+        meta_api = MetaApi()
         script_api = ScriptApi()
         config_api = ConfigApi()
         website_api = WebsitesApi()
@@ -87,6 +89,7 @@ class RestApiService:
         self.app.register_blueprint(update_api.blueprint)
         self.app.register_blueprint(query_api.blueprint)
         self.app.register_blueprint(cookie_api.blueprint)
+        self.app.register_blueprint(meta_api.blueprint)
         self.app.register_blueprint(script_api.blueprint)
         self.app.register_blueprint(config_api.blueprint)
         self.app.register_blueprint(website_api.blueprint)
@@ -125,6 +128,15 @@ class RestApiService:
                 'error': 'HTTP 方法不允许',
                 'code': 405
             }), 405
+
+        @self.app.errorhandler(413)
+        def request_entity_too_large(error):
+            """413 兜底：请求体超过 MAX_CONTENT_LENGTH 时返回 JSON 错误结构。"""
+            return jsonify({
+                'success': False,
+                'error': '请求体超过大小限制（2MB）',
+                'code': 413
+            }), 413
         
         @self.app.errorhandler(500)
         def internal_error(error):

@@ -41,10 +41,10 @@ from src.config.paths import (
 from src.service.dispatcher import ScriptDispatcher, ScriptRouteError
 from src.service.script_tools import ScriptTools
 from src.utils.logging.logger import SpiderLogger as logger
-from src.utils.threadPool.threadPool import ThreadPool
+from src.utils.thread_pool.thread_pool import ThreadPool
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import Works
-from src.utils.cookie_manager import CookieManager
+from src.utils.meta import CookieManager
 
 # 站点暂无可用下载脚本时任务的挂起状态：不参与认领，等脚本就位后统一刷回 inQueue
 NO_DOWNLOADER_STATE = 'noDownloader'

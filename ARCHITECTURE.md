@@ -33,7 +33,8 @@ SpiderScheduler/
 │   │   │   ├── database.py          # DatabaseManager：引擎/会话/PRAGMA/schema 迁移
 │   │   │   ├── models.py            # PublishPos / Works / Upload（复合主键 + 延迟复合外键）
 │   │   │   └── migrations/          # 结构迁移脚本（000N_说明.py）
-│   │   ├── cookie_manager.py        # CookieManager：按 website 存取登录 cookie（datas/cookies/）
+│   │   ├── meta/                    # MetaManager：站点 meta 文件基座（datas/meta/<website>/）
+│   │   │   └── cookie_manager.py    # CookieManager：基座之上的 cookie 封装
 │   │   └── logging/logger.py        # SpiderLogger：按月轮转文件 + 控制台
 │   └── assets/                      # 模板：confs/（yaml 配置）、scripts/（用户脚本骨架）
 ├── docker/                          # BASEPATH 工作目录（运行时从 assets 生成，已被 .gitignore 忽略）
@@ -136,7 +137,8 @@ class DownloadWork:
 
 cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `websites.yaml` 中该站点的登录页
 **原样代理**给前端（iframe），用户真实登录——代理把整个过程的 Set-Cookie 收进后端会话，
-不依赖浏览器存 cookie；点"完成并保存"落盘为 `datas/cookies/<website>.json`。
+不依赖浏览器存 cookie；点"完成并保存"落盘为 `datas/meta/<website>/cookie.json`
+（同目录还有按需导出的 Netscape `cookies.txt`，以及用户上传的其他 meta 文件）。
 细节见 `src/server/apis/cookie_api.py`（同源 HTML 改写、404 救援、重登刷新）。
 
 ## 调度循环

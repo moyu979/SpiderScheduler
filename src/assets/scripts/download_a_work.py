@@ -30,7 +30,7 @@
 
 cookie 的两种传入方式（优先级：内存 > 文件 > 无）：
 1. 文件传入（调度流默认）：cookie_manager 按 website 读
-   BASEPATH/datas/cookies/<website>.json（前端 Cookie 页登录代理的产物）：
+   BASEPATH/datas/meta/<website>/cookie.json（前端 Cookie 页登录代理的产物）：
    - requests 直连：cookie_manager.get_header(website) → "k1=v1; k2=v2"
    - Selenium：     cookie_manager.get(website) → [{name, value, ...}] 逐条
                     add_cookie；或直接 tools.get_driver()（cookie/代理/UA 全自动）

@@ -22,7 +22,7 @@ python demos/run_demo.py
 依次执行三个场景并输出每一步的 cookie 来源：
 
 - **场景一（文件传入）**：`CookieManager.save()` 把 cookie 写到
-  `<base_path>/datas/cookies/demo.json`（等价于前端 Cookie 页登录代理的产物），
+  `<base_path>/datas/meta/demo/cookie.json`（等价于前端 Cookie 页登录代理的产物），
   脚本经框架注入的 `cookie_manager` 读取。
 - **场景二（内存传入）**：不读写任何 cookie 文件。updater 经 `usr["cookies"]`、
   downloader 经 `download_info["cookies"]` 直接拿到 cookie，并演示
@@ -34,8 +34,8 @@ python demos/run_demo.py
 
 | | 文件传入（框架默认） | 内存传入 |
 | --- | --- | --- |
-| cookie 来源 | 前端 Cookie 页登录代理落盘 `BASEPATH/datas/cookies/<website>.json` | 调用方随任务参数直接携带，不落盘 |
-| 框架注入点 | `src/service/updater.py:276`、`src/service/downloader.py:473` 把 `CookieManager` 赋给 `instance.cookie_manager` | 无需注入；downloader 经 `works.downloadInfo` 字段随任务流转，updater 仅直接实例化时可用 |
+| cookie 来源 | 前端 Cookie 页登录代理落盘 `BASEPATH/datas/meta/<website>/cookie.json` | 调用方随任务参数直接携带，不落盘 |
+| 框架注入点 | `src/service/updater.py（_update_position）`、`src/service/downloader.py（_run_download_task）` 把 `CookieManager` 赋给 `instance.cookie_manager` | 无需注入；downloader 经 `works.downloadInfo` 字段随任务流转，updater 仅直接实例化时可用 |
 | 脚本侧取法 | `cookie_manager.get_header(website)`（requests）；`cookie_manager.get(website)` 逐条 `add_cookie`（Selenium） | `usr["cookies"]` / `download_info["cookies"]`，支持 Selenium `list[dict]`、`{name: value}`、`"k=v; k=v"` 三种形态 |
 | 适用场景 | 常规调度流：人工登录一次，全站复用 | cookie 由上游服务/外部登录流程临时持有；测试；不想落盘的嵌入式用法 |
 

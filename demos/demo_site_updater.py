@@ -108,7 +108,7 @@ class DemoUpdateUser(UpdateUser):
 
         cm = getattr(self, "cookie_manager", None)
         if cm is not None and cm.exists(self.website):
-            # 文件传入：读 BASEPATH/datas/cookies/<website>.json
+            # 文件传入：读 BASEPATH/datas/meta/<website>/cookie.json
             # 来源标注按注入的实现区分：框架默认注入 CookieManager 类（文件），
             # 嵌入式用法可注入同接口的内存实现（见 in_memory_cookie_manager.py）
             cm_name = cm.__name__ if isinstance(cm, type) else type(cm).__name__

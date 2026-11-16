@@ -27,10 +27,10 @@ from src.config.paths import update_script_sources
 from src.service.dispatcher import ScriptDispatcher
 from src.service.script_tools import ScriptTools
 from src.utils.logging.logger import SpiderLogger as logger
-from src.utils.threadPool.threadPool import ThreadPool
+from src.utils.thread_pool.thread_pool import ThreadPool
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import PublishPos, Works, Upload
-from src.utils.cookie_manager import CookieManager
+from src.utils.meta import CookieManager
 
 
 class Updater:

@@ -1,4 +1,6 @@
-"""ScriptTools 单元测试：日志出口、站点地址、浏览器装配（桩测）与动态注册。"""
+"""ScriptTools 单元测试：日志出口、站点地址、数据落盘根、浏览器装配（桩测）与动态注册。"""
+
+import os
 
 import pytest
 
@@ -48,6 +50,29 @@ def test_site_origin_raises_for_unconfigured_site(tools_env):
     tools = ScriptTools(website="ghost")
     with pytest.raises(ScriptToolsError, match="ghost"):
         tools.site_origin()
+
+
+# ---------------- 更新数据落盘 ----------------
+
+def test_data_root_falls_back_to_code_default(tools_env):
+    """测试无 update 配置时 data_root 回落到代码兜底根并创建站点目录。"""
+    root = _make_tools().data_root()
+    assert root == str(tools_env / "datas" / "update_data" / "e2e")
+    assert os.path.isdir(root)
+
+
+def test_data_root_resolves_site_setting_chain(tools_env):
+    """测试 data_root 按 site.<website> > site.default 解析并支持站点覆盖。"""
+    custom_default = tools_env / "custom-data"
+    custom_site = tools_env / "site-data"
+    ConfigManager.config_dict["update"] = {"site": {
+        "default": {"update_data_path": str(custom_default)},
+        "e2e": {"update_data_path": str(custom_site)},
+    }}
+    assert _make_tools().data_root() == str(custom_site / "e2e")
+
+    del ConfigManager.config_dict["update"]["site"]["e2e"]
+    assert _make_tools().data_root() == str(custom_default / "e2e")
 
 
 # ---------------- 浏览器装配（桩测 selenium） ----------------

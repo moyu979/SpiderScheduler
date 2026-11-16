@@ -1,6 +1,6 @@
 """与 CookieManager 同接口的内存 cookie 载体。
 
-框架默认把 CookieManager（文件传入，读写 BASEPATH/datas/cookies/<website>.json）
+框架默认把 CookieManager（文件传入，读写 BASEPATH/datas/meta/<website>/cookie.json）
 注入脚本的 cookie_manager 属性。当脚本被当库直接实例化、或宿主进程的 cookie
 来自其他服务而不想落盘时，用本类顶替注入即可——get/get_header/exists/save/delete
 接口与 CookieManager 完全一致，脚本代码零改动，cookie 全程只存在于内存。

@@ -1,12 +1,13 @@
 """脚本运行时工具集（ScriptTools）。
 
-downloader 在执行每个下载任务前，构造一个与"当前任务站点"绑定的工具实例，
-注入为脚本实例的 ``tools`` 属性。脚本由此获得：
+downloader / updater 在执行每个任务前，构造一个与"当前任务站点"绑定的
+工具实例，注入为脚本实例的 ``tools`` 属性。脚本由此获得：
 
 - 统一日志出口（框架 SpiderLogger，自动按类归因）；
 - 站点登录态浏览器（Selenium，自动注入 CookieManager 的 cookie，无头模式
   自动清除 UA 的 HeadlessChrome 标记）；
 - 站点入口地址查询（websites.yaml）；
+- 站点更新数据落盘根（data_root，update.yaml 的 update_data_path 解析）；
 - 动态注册扩展工具的入口（register），后续可平滑增加新能力。
 
 依赖策略：selenium 为可选依赖，仅在调用 get_driver 时才导入——脚本头部
@@ -15,8 +16,11 @@ downloader 在执行每个下载任务前，构造一个与"当前任务站点"�
 driver 不支持 with 语法，由调用方负责收尾）。
 """
 
+import os
+
 from src.config.config import ConfigManager
-from src.utils.cookie_manager import CookieManager
+from src.config.paths import update_data_path
+from src.utils.meta import CookieManager
 from src.utils.logging.logger import SpiderLogger as logger
 
 
@@ -82,6 +86,28 @@ class ScriptTools:
             raise ScriptToolsError(
                 f"websites.yaml 中没有配置 website={self.website!r} 的入口地址（可用: {available}）")
         return url.rstrip('/')
+
+    # ---------------- 更新数据落盘 ----------------
+
+    def data_root(self):
+        """返回本站点的更新数据落盘根 <update_data_path>/<website>/（懒创建）。
+
+        更新脚本把位点级/站点级的文本类数据（视为下载数据，如简介、字幕、
+        评论存档）写到这里，内部结构（作者子目录、站点级文件）由脚本自定。
+        路径解析与下载侧 download_path 同源：update.yaml 的
+        site.<website> > site.default > 代码兜底（支持 ${BASE_PATH} 与热更新）。
+
+        Returns:
+            str: 站点数据目录（不存在则创建）。
+        """
+        try:
+            root = self.config_manager.site_setting(
+                'update', self.website, 'update_data_path', update_data_path())
+        except Exception:  # 配置层异常：退回代码兜底，不让脚本崩在路径解析上
+            root = update_data_path()
+        site_dir = os.path.join(str(root or update_data_path()), self.website)
+        os.makedirs(site_dir, exist_ok=True)
+        return site_dir
 
     # ---------------- 代理 ----------------
 

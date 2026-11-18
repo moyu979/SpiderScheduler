@@ -508,16 +508,47 @@ class Downloader:
 
         Args:
             result: download_it 的返回值（str 产物路径，或 dict 形如
-                ``{path, duration?}``）。
+                ``{path, duration?, merge?}``）。
 
         Returns:
-            tuple: (产物路径, 时长秒数)；缺失的项为 None。
+            tuple: (产物路径, 时长秒数, 是否增量合并搬运)；缺失的项为 None/False。
         """
         if isinstance(result, dict):
-            return result.get('path'), result.get('duration')
-        return result, None
+            return (result.get('path'), result.get('duration'),
+                    bool(result.get('merge')))
+        return result, None, False
 
-    def _deliver_to_final(self, cache_root, download_root, payload, website):
+    @staticmethod
+    def _merge_move_dir(src_dir, dest_dir):
+        """把 src_dir 的内容逐文件搬进 dest_dir（递归、同名覆盖），搬空后删除 src_dir。
+
+        增量合并搬运的落点逻辑：目的地里已有的文件是前次交付的产物，保持不动；
+        本次搬入的同名文件直接覆盖（脚本产出同名即代表内容应更新）；子目录递归
+        合并。只在缓存侧产物目录与最终目录已并存时调用。
+
+        Args:
+            src_dir: 缓存侧产物目录（搬空即删）。
+            dest_dir: 最终保存侧目录（已存在）。
+        """
+        os.makedirs(dest_dir, exist_ok=True)
+        for entry in sorted(os.listdir(src_dir)):
+            s = os.path.join(src_dir, entry)
+            d = os.path.join(dest_dir, entry)
+            if os.path.isdir(s):
+                if os.path.isdir(d) and not os.path.islink(d):
+                    Downloader._merge_move_dir(s, d)
+                    continue
+                if os.path.lexists(d):
+                    os.remove(d)
+            elif os.path.isdir(d) and not os.path.islink(d):
+                shutil.rmtree(d)      # 文件顶替旧目录：整体清掉再放
+            elif os.path.lexists(d):
+                os.remove(d)
+            shutil.move(s, d)
+        os.rmdir(src_dir)
+
+    def _deliver_to_final(self, cache_root, download_root, payload, website,
+                          merge=False):
         """cache 模式收尾：把脚本产物从缓存根搬到最终保存根；两层一致则原地保留。
 
         约定（与脚本模板一致）：
@@ -525,13 +556,18 @@ class Downloader:
         - payload 为产物路径，相对站点根或绝对路径均可；
         - cache_root 与 download_root 一致（未配独立缓存层）时无需搬运，返回 None；
         - 否则按相对层级搬到 <download_root>/<website>/<rel>，并清理该作品在
-          缓存侧的顶层残留（脚本可能产出 payload 之外的伴生文件，如弹幕 xml）。
+          缓存侧的顶层残留（脚本可能产出 payload 之外的伴生文件，如弹幕 xml）；
+        - merge 开且目的地已有同名目录时按增量合并搬运：逐文件并入（同名覆盖）、
+          保留目的地已有其他文件——供同一作品多版本产物累积进同一目录的脚本
+          （如画廊追加页）使用；缺省 false 保持整体替换语义。
 
         Args:
             cache_root: 缓存根目录。
             download_root: 最终保存根目录。
             payload: 脚本 download_it 返回的产物路径（str）。
             website: 站点名。
+            merge: 目录型产物的搬运模式：true=增量合并（不删目的地已有文件），
+                false=整体替换（目的地整个目录清空后搬入）。
 
         Returns:
             str | None: 产物最终落到的路径；无需搬运时 None。
@@ -554,9 +590,20 @@ class Downloader:
             raise RuntimeError(f"产物路径 {payload} 不在缓存下载根 {cache_site} 之下，无法搬运")
         dest = os.path.normpath(os.path.join(download_root, website, rel))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        if os.path.isdir(src) and os.path.exists(dest):
-            shutil.rmtree(dest)  # 目的地已有旧产物（上次中断残留）：整体替换
-        shutil.move(src, dest)
+        if os.path.isdir(src):
+            if os.path.exists(dest):
+                if merge and os.path.isdir(dest) and not os.path.islink(dest):
+                    self._merge_move_dir(src, dest)  # 增量合并：逐文件并入，保留目的地已有产物
+                    return dest
+                if os.path.isdir(dest) and not os.path.islink(dest):
+                    shutil.rmtree(dest)  # 目的地已有旧产物（上次中断残留）：整体替换
+                else:
+                    os.remove(dest)
+                shutil.move(src, dest)
+            else:
+                shutil.move(src, dest)
+        else:
+            shutil.move(src, dest)
         # 清理本作品在缓存侧的顶层残留（payload 只指向目录内单个文件时尤其必要）
         top = os.path.join(cache_site, rel.split(os.sep)[0])
         if os.path.isdir(top):
@@ -612,12 +659,13 @@ class Downloader:
             downloader_instance.tools = ScriptTools(website=website)
 
             result = downloader_instance.download_it()
-            payload, duration = self._parse_result(result)
+            payload, duration, merge = self._parse_result(result)
 
             if use_cache:
                 if not payload:
                     raise RuntimeError("缓存模式下 download_it 必须返回下载产物路径")
-                dest = self._deliver_to_final(cache_root, final_root, payload, website)
+                dest = self._deliver_to_final(cache_root, final_root, payload,
+                                              website, merge=merge)
                 if dest:
                     logger.info(f"产物已搬运到 {dest}")
 

@@ -88,7 +88,7 @@ pattern)`（fnmatch 通配，如 `"cookie*"`）；站点名与文件名一律白
 |---|---|
 | `log(level, message)` | 以站点上下文写日志（`"info"` / `"warning"` / …） |
 | `site_origin()` | websites.yaml 中本站点入口地址（无配置抛 ScriptToolsError） |
-| `data_root()` | 本站点更新数据落盘根 `<update_data_path>/<website>/`（懒创建）；更新脚本把位点级/站点级的文本类数据写这里，内部结构自定 |
+| `data_root()` | 本站点更新数据落盘根 `<update_data_path>/<website>/`（懒创建）；更新脚本把位点级/站点级的文本类数据写这里，内部结构自定。下载脚本同样可在此持久化运行状态（如增量页号水位 `pages_<gid>.json`）——站点业务状态统一归 update 数据根，`datas/meta` 只留登录态 |
 | `get_proxies()` | 可直接传给 requests 的代理字典；未启用为 `{}`（可不加判断直接传） |
 | `get_driver(...)` | 携带本站点登录态与代理的 Chrome；用完必须 `driver.quit()`；需 `# requirements: selenium` |
 | `register(name, fn)` | 动态注册扩展工具，之后经 `self.tools.<name>(...)` 调用 |
@@ -185,7 +185,10 @@ class SiteDownloadWork:
 
 - 返回 `str`：产物路径（相对 `download_path` 或绝对路径）。
 - 返回 `dict`：`{"path": 路径, "duration": 秒}`，`duration` 供站点
-  `waiting_play` 模拟播放时长（视频站用）。
+  `waiting_play` 模拟播放时长（视频站用）；可再加 `"merge": true` 声明
+  **增量合并搬运**——缓存模式下最终根已有同名目录时逐文件并入（同名覆盖、
+  保留目的地其他文件），缺省 false 为整体替换。适用于同一作品多版本产物
+  累积进同一目录的脚本（如画廊追加页）。
 - 配了独立缓存层时，框架会按相对层级把产物从缓存根搬到最终保存根——脚本只管
   写进 `download_path`、返回相对路径即可。缓存模式下返回空路径、返回站点根本
   身、或指向缓存根之外都会判任务失败。
@@ -279,6 +282,11 @@ class SiteUpdateUser:
 默认值：`update_interval` 21600（±10% 抖动，`-1` 持续）、`update_thread` 1
 （改动需重启）、`commit_interval` 8、`page_interval` 5（框架灌给脚本）、
 `do_update` true。细节见契约文档 §4.5。
+
+`site.<website>` 段是**自由字典**：框架只解析上面这些键，其余字段原样保留，
+更新器可经 `tools.config_manager.site_setting('update', website, key, default)`
+读取（下载器由注入的 `config_manager` 直接读，见 §3.5）——站点级自定义参数
+无需框架改造，热更新生效。
 
 ## 交付前检查清单
 

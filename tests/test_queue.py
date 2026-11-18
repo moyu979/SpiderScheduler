@@ -359,6 +359,58 @@ def test_deliver_rejects_root_and_escape(tmp_path):
         d._deliver_to_final(str(cache_root), str(tmp_path / "final"), "/etc/hosts", "pixiv")
 
 
+def test_parse_result_merge_flag():
+    """返回值 dict 的 merge 键解析：缺省 False，真值透传"""
+    assert Downloader._parse_result({"path": "p", "duration": 3, "merge": True}) \
+        == ("p", 3, True)
+    assert Downloader._parse_result({"path": "p"}) == ("p", None, False)
+    assert Downloader._parse_result("p") == ("p", None, False)
+
+
+def test_deliver_merge_keeps_existing_files(tmp_path):
+    """merge=True：目的地已有同名目录时逐文件并入，保留旧产物，缓存侧清理干净"""
+    cache_root = tmp_path / "cache"
+    download_root = tmp_path / "final"
+    site = cache_root / "pixiv"
+    # 前次交付：最终根已有 W1/old.bin 与同名文件 same.bin(V1)，含子目录结构
+    (download_root / "pixiv" / "W1" / "sub").mkdir(parents=True)
+    (download_root / "pixiv" / "W1" / "old.bin").write_text("OLD")
+    (download_root / "pixiv" / "W1" / "same.bin").write_text("V1")
+    (download_root / "pixiv" / "W1" / "sub" / "deep.bin").write_text("DEEP-OLD")
+    # 本次产物：新增 new.bin、同名覆盖 same.bin(V2)、子目录新增文件
+    (site / "W1" / "sub").mkdir(parents=True)
+    (site / "W1" / "new.bin").write_text("NEW")
+    (site / "W1" / "same.bin").write_text("V2")
+    (site / "W1" / "sub" / "fresh.bin").write_text("FRESH")
+
+    d = Downloader()
+    dest = d._deliver_to_final(str(cache_root), str(download_root),
+                               "W1", "pixiv", merge=True)
+    assert dest == str(download_root / "pixiv" / "W1")
+    assert (download_root / "pixiv" / "W1" / "old.bin").read_text() == "OLD"
+    assert (download_root / "pixiv" / "W1" / "sub" / "deep.bin").read_text() == "DEEP-OLD"
+    assert (download_root / "pixiv" / "W1" / "new.bin").read_text() == "NEW"
+    assert (download_root / "pixiv" / "W1" / "same.bin").read_text() == "V2"
+    assert (download_root / "pixiv" / "W1" / "sub" / "fresh.bin").read_text() == "FRESH"
+    assert not (site / "W1").exists()                 # 缓存侧整个作品目录已清理
+
+
+def test_deliver_merge_false_replaces_directory(tmp_path):
+    """缺省 merge=False：目的地已有目录整体替换（原语义不变）"""
+    cache_root = tmp_path / "cache"
+    download_root = tmp_path / "final"
+    (download_root / "pixiv" / "W1").mkdir(parents=True)
+    (download_root / "pixiv" / "W1" / "old.bin").write_text("OLD")
+    site = cache_root / "pixiv"
+    (site / "W1").mkdir(parents=True)
+    (site / "W1" / "new.bin").write_text("NEW")
+
+    d = Downloader()
+    d._deliver_to_final(str(cache_root), str(download_root), "W1", "pixiv")
+    assert (download_root / "pixiv" / "W1" / "new.bin").read_text() == "NEW"
+    assert not (download_root / "pixiv" / "W1" / "old.bin").exists()
+
+
 def test_cache_on_without_payload_marks_failed(db, cache_env, monkeypatch):
     """测试缓存模式下脚本不返回产物路径时任务标 failed。"""
     _add(workNumber="W", website="pixiv", state="downloading")

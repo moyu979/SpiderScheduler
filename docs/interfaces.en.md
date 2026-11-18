@@ -61,7 +61,7 @@ Assigned by the framework **after** construction (do **not** read them in
 |---|---|
 | `log(level, message)` | log with site context (`"info"` / `"warning"` / …) |
 | `site_origin()` | the site's entry URL from websites.yaml (`ScriptToolsError` if unconfigured) |
-| `data_root()` | the site's update-data root `<update_data_path>/<website>/` (created on demand; update.yaml `site.update_data_path` > code fallback) |
+| `data_root()` | the site's update-data root `<update_data_path>/<website>/` (created on demand; update.yaml `site.update_data_path` > code fallback). Writable from both sides: update-side data assets (baselines, metadata archives) and download-side runtime state (e.g. incremental page-number watermark) |
 | `proxy_url()` | proxy address from system.yaml; `None` when disabled |
 | `get_proxies()` | proxy dict for requests; `{}` when disabled |
 | `get_driver(...)` | Chrome (Selenium) with the site's login cookies and proxy; call `driver.quit()` when done; needs `# requirements: selenium` |
@@ -152,13 +152,19 @@ updater); the `add_work` API accepts a JSON object directly. By convention a
 - `str`: the payload path — relative to `download_path` (the site download
   root) or absolute;
 - `dict`: `{"path": payload path, "duration": seconds}`, `duration` used by
-  `waiting_play` to simulate playback time.
+  `waiting_play` to simulate playback time; an extra `"merge": true` key
+  requests **incremental (merging) delivery**.
 
 Delivery rules (cache mode, handled by the framework):
 
 - cache root ≠ final save root: the framework **moves** the payload to
   `download_path/<website>/` by relative layout and cleans the work's leftovers
   on the cache side;
+- cache root ≠ final save root and the return value carries `merge: true`:
+  an existing directory with the same name at the destination is no longer
+  replaced wholesale — files are merged in one by one (same-name overwrite,
+  other existing files untouched) — for scripts that accumulate multiple
+  versions of one work into a single directory (e.g. gallery page appends);
 - the two roots are equal (no staging layer) or `use_cache` is off: payloads
   stay where the script wrote them;
 - cache mode with an empty path, the site root itself, or a path outside the
@@ -267,6 +273,11 @@ between fetches; pure-API sites may ignore it).
 | `commit_interval` | `8` | seconds between submitting successive positions (stagger) |
 | `page_interval` | `5` | seconds between pages within one position, fed to the script |
 | `update_data_path` | `datas/update_data` | root for update-script data files (`${BASE_PATH}` supported); scripts get `<root>/<website>/` via `tools.data_root()` — position-level or site-level text data goes here, internal layout is up to the script |
+
+The `site.<website>` section is a free dictionary: the framework only parses the
+keys above and keeps everything else untouched. Update scripts can read those
+free keys via `tools.config_manager.site_setting('update', website, key,
+default)` (e.g. site-specific per-round output caps); changes hot-reload.
 
 ## 5. Scheduler Service Interfaces
 

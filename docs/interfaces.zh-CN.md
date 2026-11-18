@@ -53,7 +53,7 @@
 |---|---|
 | `log(level, message)` | 以站点上下文写日志（`"info"` / `"warning"` / …） |
 | `site_origin()` | websites.yaml 中本站点的入口地址（无配置抛 `ScriptToolsError`） |
-| `data_root()` | 本站点的更新数据落盘根 `<update_data_path>/<website>/`（懒创建；update.yaml `site.update_data_path` > 代码兜底） |
+| `data_root()` | 本站点的更新数据落盘根 `<update_data_path>/<website>/`（懒创建；update.yaml `site.update_data_path` > 代码兜底）。两侧脚本都可写：更新侧放数据资产（基线、元数据存档），下载侧可持久化运行状态（如增量页号水位） |
 | `proxy_url()` | system.yaml 配置的代理地址；未启用返回 `None` |
 | `get_proxies()` | 可直接传给 requests 的代理字典；未启用返回 `{}` |
 | `get_driver(...)` | 携带本站点登录态与代理的 Chrome（Selenium）；用完须 `driver.quit()`；需 `# requirements: selenium` |
@@ -133,12 +133,15 @@ dict，无则 `None`。框架预置 `{"authorId", "workNumber"}`（更新器写�
 
 - `str`：产物路径——相对 `download_path`（站点下载根）的相对路径，或绝对路径；
 - `dict`：`{"path": 产物路径, "duration": 秒}`，`duration` 供 `waiting_play`
-  模拟播放时长。
+  模拟播放时长；可再加 `"merge": true` 声明**增量合并搬运**。
 
 交付规则（cache 模式，框架侧完成）：
 
 - 缓存根 ≠ 最终保存根：框架按相对层级把产物搬到
   `download_path/<website>/` 下，并清理该作品在缓存侧的残留；
+- 缓存根 ≠ 最终保存根且返回值带 `merge: true` 时，目的地已存在的同名目录
+  不再整体替换，改为逐文件并入（同名覆盖、保留目的地其他已有文件）——供
+  同一作品多版本产物累积进同一目录的脚本（如画廊追加页、追更番剧）使用；
 - 两层一致（未配独立缓存层）或 `use_cache` 关：产物原地保留，无需搬运；
 - 缓存模式下返回空路径、返回站点根本身、或指向缓存根之外 → 任务失败。
 
@@ -237,6 +240,10 @@ Selenium `list[dict]`、`{name: value}` dict、`"k=v; k=v"` 字符串；该键�
 | `commit_interval` | `8` | 相邻位点任务的提交间隔（秒，错峰） |
 | `page_interval` | `5` | 位点内翻页间隔（秒），框架灌给脚本 |
 | `update_data_path` | `datas/update_data` | 更新脚本数据落盘根（`${BASE_PATH}` 可用），脚本经 `tools.data_root()` 取 `<根>/<website>/`，位点级/站点级的文本类数据都写这里，内部结构由脚本自定 |
+
+`site.<website>` 段是自由字典：框架只解析上表键，其余字段原样保留，更新脚本
+可经 `tools.config_manager.site_setting('update', website, key, default)` 读取
+（如站点自定义的每轮产出上限等），热更新生效。
 
 ## 5. 调度服务公共接口
 

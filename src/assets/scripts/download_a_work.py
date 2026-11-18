@@ -21,9 +21,13 @@
 - download_it() 执行下载并返回产物路径，抛出异常即任务失败：
     str:                          产物路径——相对 download_path（站点下载根）
                                   的相对路径，或绝对路径
-    {"path": ..., "duration": 秒}: duration 供站点 waiting_play 模拟播放时长
+    {"path": ..., "duration": 秒}: duration 供站点 waiting_play 模拟播放时长；
+                                  另可加 "merge": True 声明增量合并搬运
   交付规则：缓存层与最终层路径不一致时，框架按相对层级把产物搬到最终保存
   根 <download_path根>/<website>/ 下并清理缓存残留；一致时原地保留。
+  返回值带 "merge": True 且最终根已有同名目录时不再整体替换，改为逐文件
+  并入（同名覆盖、保留其他已有文件）——供同一作品多版本产物累积进同一
+  目录的脚本（如画廊追加页）使用；缺省 false 保持整体替换。
 - 框架注入实例属性（构造完成后赋值，因此不要在 __init__ 里读取）：
     logger（SpiderLogger）、config_manager（ConfigManager 单例）、
     cookie_manager（CookieManager 类）、tools（ScriptTools，见下）
@@ -112,6 +116,7 @@ class DownloadWork:
               根 <download_path根>/<website>/ 下并清理缓存残留；一致时原地
               保留
             - dict: {"path": 产物路径, "duration": 秒（可选，供 waiting_play
-              模拟播放时长）}
+              模拟播放时长），"merge": True（可选，增量合并搬运——最终根已有
+              同名目录时逐文件并入而非整体替换）}
         """
         pass

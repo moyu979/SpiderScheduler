@@ -47,3 +47,6 @@ __pycache__/
 # 忽略操作系统生成的文件
 .DS_Store
 Thumbs.db
+# 在线自更新的运行时标记（仅存在于容器 /app，不随仓库分发）
+.req_hash
+.last_update.json

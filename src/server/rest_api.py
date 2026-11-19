@@ -20,6 +20,7 @@ from src.server.apis.meta_api import MetaApi
 from src.server.apis.script_api import ScriptApi
 from src.server.apis.config_api import ConfigApi
 from src.server.apis.website_api import WebsitesApi
+from src.server.apis.selfupdate_api import SelfUpdateApi
 
 class RestApiService:
     """REST API 服务。
@@ -83,6 +84,7 @@ class RestApiService:
         script_api = ScriptApi()
         config_api = ConfigApi()
         website_api = WebsitesApi()
+        selfupdate_api = SelfUpdateApi()
 
         # 注册蓝图
         self.app.register_blueprint(download_api.blueprint)
@@ -93,6 +95,7 @@ class RestApiService:
         self.app.register_blueprint(script_api.blueprint)
         self.app.register_blueprint(config_api.blueprint)
         self.app.register_blueprint(website_api.blueprint)
+        self.app.register_blueprint(selfupdate_api.blueprint)
 
         logger.info("所有 API 模块已注册")
     

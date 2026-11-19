@@ -250,6 +250,7 @@ class DownloadWork:
 | `DELETE /api/meta/<w>/<pattern>` | 按通配删除 meta 文件（如 `cookie*`） |
 | `GET /api/system/scripts` · `POST .../reload` | 路由表 · 热重载脚本 |
 | `GET /api/system/scripts/<kind>/source` · `POST .../upload` | 查看脚本 · 上传（multipart：`kind`+`file`） |
+| `GET /api/system/selfupdate/status` · `POST .../run` · `POST .../restart` | 在线更新状态 · 从 GitHub 拉取最新代码 · 优雅热重启生效（仅容器部署） |
 | `GET /api/system/config` · `GET/PUT /api/system/config/<段>/raw` · `POST /api/system/config/reload` | 配置查看 / YAML 读写 / 整体重载 |
 | `PUT /api/{update,download,global,network}/config` | 按键更新对应配置段（键必须已存在） |
 

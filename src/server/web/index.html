@@ -211,6 +211,16 @@
         <span id="cfg-msg"></span>
       </div>
     </div>
+    <div class="sys-block">
+      <div class="sys-head">
+        <b>版本更新</b>
+        <span class="hint">容器部署时可比照启动期 AUTO_UPDATE，主动从 GitHub 拉取最新代码（requirements 变化会自动补装依赖，失败自动回滚）；拉取后点「重启生效」完成热更——优雅收尾在途任务后以新代码自动重启（exec 自替换，通常几秒到几分钟，取决于在途任务）</span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="ghost" id="btn-self-update">从 GitHub 拉取最新</button>
+        <button class="ghost" id="btn-self-restart">重启生效</button>
+      </div>
+      <div class="up-row"><span class="hint" id="selfupdate-status">加载中…</span></div>
+    </div>
   </div>
 
   <table id="table"></table>
@@ -807,6 +817,7 @@ async function loadSystem() {
     if ((cfg.sections || []).length) await loadSection(sel.value);
     else setCfgMsg('没有可编辑的配置段');
   } catch (e) { showError(e.message); }
+  loadSelfUpdate();
 }
 
 function renderScriptRoutes(routes) {
@@ -971,6 +982,70 @@ $('btn-cfg-reload-all').onclick = async (e) => {
     setCfgMsg('已从文件重载全部配置', true);
   } catch (err) { setCfgMsg(`重载失败：${err.message}`, false); }
   e.target.disabled = false;
+};
+
+/* 版本更新（容器部署在线拉取，后台执行 + 轮询） */
+const shortCommit = (c) => c ? `<code>${esc(c)}</code>` : '—';
+let selfUpdateTimer = null;
+
+function renderSelfUpdate(st) {
+  const el = $('selfupdate-status');
+  const pullBtn = $('btn-self-update');
+  const restartBtn = $('btn-self-restart');
+  if (!st.supported) {
+    el.textContent = '当前非容器部署，在线拉取与热重启不可用（开发目录带本地提交，禁止硬重置）';
+    pullBtn.classList.add('hidden');
+    restartBtn.classList.add('hidden');
+    return;
+  }
+  pullBtn.classList.remove('hidden');
+  restartBtn.classList.remove('hidden');
+  pullBtn.disabled = restartBtn.disabled = (st.state === 'running' || st.state === 'restarting');
+  let line = `分支 ${esc(st.branch)} · 当前 ${shortCommit(st.current_commit ?? st.old_commit)}`;
+  if (st.state === 'running') line += ' · 拉取更新中…';
+  else if (st.state === 'restarting') line += ' · <span style="color:#b45309">热重启中…正在收尾在途任务，完成后自动以新代码回来（期间页面会短暂失联）</span>';
+  else if (st.state === 'done' && st.updated) line += ` · 已拉取 ${shortCommit(st.old_commit)} → ${shortCommit(st.new_commit)}，点「重启生效」加载新代码`;
+  else if (st.state === 'done') line += ` · 已是最新（${shortCommit(st.new_commit)}）`;
+  else if (st.state === 'failed') line += ` · <span style="color:#b91c1c">失败：${esc(st.message)}</span>`;
+  if (st.last_applied) line += ` · 上次热重启生效于 ${esc(st.last_applied.restarted_at)}（${shortCommit(st.last_applied.commit)}）`;
+  el.innerHTML = line;
+  if ((st.state === 'running' || st.state === 'restarting') && !selfUpdateTimer) pollSelfUpdate();
+}
+
+function pollSelfUpdate() {
+  if (selfUpdateTimer) return;
+  selfUpdateTimer = setInterval(async () => {
+    try {
+      const st = (await api('/api/system/selfupdate/status')).status;
+      renderSelfUpdate(st);
+      if (st.state !== 'running' && st.state !== 'restarting') {
+        clearInterval(selfUpdateTimer); selfUpdateTimer = null;
+      }
+    } catch (err) { /* 重启收尾期间服务短暂下线，忽略并下轮重试 */ }
+  }, 2000);
+}
+
+async function loadSelfUpdate() {
+  try {
+    renderSelfUpdate((await api('/api/system/selfupdate/status')).status);
+  } catch (e) { $('selfupdate-status').textContent = '状态加载失败: ' + e.message; }
+}
+
+$('btn-self-update').onclick = async (e) => {
+  e.target.disabled = true;
+  try {
+    await api.post('/api/system/selfupdate/run');
+  } catch (err) { showError(err.message); e.target.disabled = false; return; }
+  pollSelfUpdate();
+};
+
+$('btn-self-restart').onclick = async (e) => {
+  if (!window.confirm('确定热重启吗？在途任务会优雅收尾后以新代码自动重启，期间页面短暂失联。')) return;
+  e.target.disabled = true;
+  try {
+    await api.post('/api/system/selfupdate/restart');
+  } catch (err) { showError(err.message); e.target.disabled = false; return; }
+  pollSelfUpdate();
 };
 
 loadStats().then(load);

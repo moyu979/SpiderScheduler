@@ -275,6 +275,7 @@ Responses are `{"success": true/false, ...}`; entity identity is always `(id, we
 | `DELETE /api/meta/<w>/<pattern>` | delete meta files by fnmatch pattern (e.g. `cookie*`) |
 | `GET /api/system/scripts` · `POST .../reload` | route table · hot-reload scripts |
 | `GET /api/system/scripts/<kind>/source` · `POST .../upload` | view a script · upload (multipart: `kind`+`file`) |
+| `GET /api/system/selfupdate/status` · `POST .../run` · `POST .../restart` | self-update status · pull latest code from GitHub · graceful hot-restart to apply (container deployments only) |
 | `GET /api/system/config` · `GET/PUT /api/system/config/<section>/raw` · `POST /api/system/config/reload` | list sections · read/write YAML · full reload |
 | `PUT /api/{update,download,global,network}/config` | update keys of a section (keys must exist) |
 

@@ -44,7 +44,8 @@ publish_pos（发布位点）       works                          upload
 
 - `publish_pos.state`: `inQueue` ⇄ `stopped`（stopped 的位点被 updater 跳过）。
 - `works.state`（下载管线）: `inQueue（或 NULL，兼容旧数据）→ downloading → done / failed`；
-  `stopped` 可随时置入：调度跳过、完成回调不覆盖；崩溃残留的 `downloading` 每轮开始重置回 `inQueue`。
+  `stopped` 可随时置入：调度跳过，失败收尾不覆盖它，成功收尾如实置 `done`（产物已落盘，状态与磁盘一致）；
+  崩溃残留的 `downloading` 每轮开始重置回 `inQueue`。
   站点无下载脚本时置 `noDownloader` 挂起（不标 failed），脚本上传/重载/启动时自动刷回 `inQueue`。
 - 源站自身的作品状态不入 `state`，存 `otherInfo` 的 `siteState` 键（JSON）。
 

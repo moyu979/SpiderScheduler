@@ -91,8 +91,8 @@ def test_finish_marks_failed(db):
     assert _state("W") == "failed"
 
 
-def test_finish_does_not_overwrite_stopped(db):
-    """测试收尾不覆盖人工置入的 stopped 状态。"""
+def test_finish_success_overwrites_stopped(db):
+    """测试下载期间被置入 stopped 后成功收尾：如实置 done（产物已落盘）。"""
     _add(workNumber="W", website="pixiv", state="inQueue")
     d = Downloader()
     d._claim_next_work('pixiv')
@@ -102,7 +102,38 @@ def test_finish_does_not_overwrite_stopped(db):
 
     d._finish_work("W", "pixiv", success=True)
 
+    with DatabaseManager.get_db_session() as s:
+        w = s.get(Works, ("W", "pixiv"))
+        assert w.state == "done"
+        assert w.downloadDate
+
+
+def test_finish_failure_keeps_stopped(db):
+    """测试失败收尾不覆盖人工置入的 stopped（stop 意愿优先，不升级为 failed）。"""
+    _add(workNumber="W", website="pixiv", state="inQueue")
+    d = Downloader()
+    d._claim_next_work('pixiv')
+    with DatabaseManager.get_db_session() as s:
+        s.get(Works, ("W", "pixiv")).state = "stopped"
+
+    d._finish_work("W", "pixiv", success=False)
+
     assert _state("W") == "stopped"
+
+
+def test_finish_does_not_touch_requeued(db):
+    """测试下载中被 requeue 竞态置回 inQueue 时，收尾不覆盖重排意图。"""
+    _add(workNumber="W", website="pixiv", state="inQueue")
+    d = Downloader()
+    d._claim_next_work('pixiv')
+    with DatabaseManager.get_db_session() as s:
+        s.get(Works, ("W", "pixiv")).state = "inQueue"
+
+    d._finish_work("W", "pixiv", success=True)
+    assert _state("W") == "inQueue"
+
+    d._finish_work("W", "pixiv", success=False)
+    assert _state("W") == "inQueue"
 
 
 def test_requeue_stale_downloading(db):

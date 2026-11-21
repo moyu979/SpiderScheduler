@@ -176,7 +176,7 @@ Delivery rules (cache mode, handled by the framework):
 |---|---|
 | `download_it()` raises anything | work → `failed`, exception logged |
 | no script routed for the site (`ScriptRouteError`) | work → `noDownloader` suspended (**not** `failed`) |
-| API sets `stopped` during download/suspension | stays `stopped`; completion callbacks never overwrite it |
+| API sets `stopped` during download/suspension | failure completion leaves it `stopped`; success completion honestly records `done` with `downloadDate` |
 
 Suspended works are not claimed. When the site's script is uploaded/reloaded or
 the service starts, sites that now have a usable script get their suspended
@@ -285,8 +285,9 @@ default)` (e.g. site-specific per-round output caps); changes hot-reload.
 
 `works.state` machine:
 `inQueue (or NULL, legacy data) → downloading → done / failed`;
-`stopped` may be set via API at any time (skipped by scheduling, never
-overwritten by completion callbacks); `noDownloader` suspension see §3.4;
+`stopped` may be set via API at any time (skipped by scheduling; failure
+completion leaves it untouched, success completion records `done`);
+`noDownloader` suspension see §3.4;
 `downloading` leftovers from a crashed process are reset to `inQueue` at each
 round start.
 

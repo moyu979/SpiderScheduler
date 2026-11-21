@@ -151,7 +151,7 @@ dict，无则 `None`。框架预置 `{"authorId", "workNumber"}`（更新器写�
 |---|---|
 | `download_it()` 抛任意异常 | 作品置 `failed`，日志记录异常 |
 | 分发器无该站点脚本（`ScriptRouteError`） | 作品置 `noDownloader` 挂起（**不标 failed**） |
-| 挂起/下载期间被 API 置 `stopped` | 保持 `stopped`，完成回调不覆盖 |
+| 挂起/下载期间被 API 置 `stopped` | 失败收尾不覆盖（保持 `stopped`）；成功收尾如实置 `done` 并记 `downloadDate` |
 
 `noDownloader` 的作品不参与认领；站点脚本上传/重载成功或服务启动时，已有可用
 脚本的站点自动刷回 `inQueue`（`Downloader.requeue_no_downloader()`）。
@@ -251,7 +251,7 @@ Selenium `list[dict]`、`{name: value}` dict、`"k=v; k=v"` 字符串；该键�
 
 `works.state` 状态机：
 `inQueue（或 NULL，兼容旧数据） → downloading → done / failed`；
-`stopped` 可随时由 API 置入（调度跳过、完成回调不覆盖）；`noDownloader` 挂起
+`stopped` 可随时由 API 置入（调度跳过；失败收尾不覆盖，成功收尾如实置 `done`）；`noDownloader` 挂起
 见 §3.4；进程中断残留的 `downloading` 每轮开始重置回 `inQueue`。
 
 | 方法 | 说明 |

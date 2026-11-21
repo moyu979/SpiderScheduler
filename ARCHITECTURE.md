@@ -66,7 +66,7 @@ publish_pos（发布位点）       works                          upload
 - `publish_pos.state`: `inQueue`（参与更新）/ `stopped`（Updater 跳过）。由 REPL / `stop_pos` API 设置。
 - `works.state`（下载管线）:
   `inQueue（或 NULL，兼容旧数据） → downloading → done / failed`；
-  `stopped` 可随时由 `stop_work` API 置入：调度跳过、完成回调不覆盖。
+  `stopped` 可随时由 `stop_work` API 置入：调度跳过；失败收尾不覆盖，成功收尾如实置 `done`（产物已落盘，状态与磁盘一致）。
   下载中断残留的 `downloading` 会在下一轮开始时自动重置回 `inQueue`。
   站点暂无可用下载脚本（`ScriptRouteError`）时不标 `failed`，置 `noDownloader`
   挂起；下载脚本上传/重载或服务启动后，站点已就位脚本的挂起作品自动刷回 `inQueue`。
@@ -153,8 +153,8 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 启动独立调度线程——各自独立的线程池（`download_thread`）、轮间隔（`download_interval`，-1
 持续下载）、数量限制（`once_download_number`）、缓存与路径。站点循环内：回收中断残留 →
 按优先级认领本站任务（`state ∈ {inQueue, NULL}`）→ 认领即置 `downloading`，交线程池执行 →
-成功置 `done` 记录 `downloadDate`，异常置 `failed`（不覆盖 `stopped`），站点无下载脚本置
-`noDownloader` 挂起 → 轮末等任务收尾。
+成功置 `done` 记录 `downloadDate`（下载期间被置 `stopped` 的亦如实记成功），异常仅把
+`downloading` 置 `failed`（不覆盖 `stopped`），站点无下载脚本置 `noDownloader` 挂起 → 轮末等任务收尾。
 站点级配置写在 `download.yaml` 的 `site` 结构（解析顺序 site.<website> > site.default > 代码内置兜底），支持运行中热更新
 （线程数除外，改动后重启进程或站点线程重建时生效）；全局 `do_download` 是总开关，
 站点级 `do_download: false` 可单独关站，开关恢复后守护线程自动重新拉起。

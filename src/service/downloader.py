@@ -1,11 +1,12 @@
 """下载调度服务。
 
 队列语义（works.state）：inQueue（或 NULL，兼容旧数据）→ downloading →
-done / failed；stopped 可随时由 API 置入：调度时被跳过，且不会被完成回调
-覆盖。认领即置为 downloading；轮末等待池内任务全部收尾，并把进程中断残留
-的 downloading 重新入队。站点暂无可用下载脚本时任务不标 failed，而是置
-noDownloader 挂起——下载脚本上传/重载或服务启动后，站点已有脚本的挂起
-作品自动刷回 inQueue（见 requeue_no_downloader）。
+done / failed；stopped 可随时由 API 置入：调度时被跳过，失败收尾不覆盖
+它，但成功收尾如实置 done（产物已落盘，状态与磁盘一致）。认领即置为
+downloading；轮末等待池内任务全部收尾，并把进程中断残留的 downloading
+重新入队。站点暂无可用下载脚本时任务不标 failed，而是置 noDownloader
+挂起——下载脚本上传/重载或服务启动后，站点已有脚本的挂起作品自动刷回
+inQueue（见 requeue_no_downloader）。
 
 站点模型：守护线程周期性发现有待下载作品的站点，为每个站点启动独立的
 调度线程——各自独立的线程池、轮间隔、数量限制、缓存/路径，互不干扰。
@@ -422,8 +423,10 @@ class Downloader:
     def _finish_work(self, work_number, website, success):
         """任务收尾：回写作品状态。
 
-        成功置 done 并记录 downloadDate；失败置 failed。仅当当前状态为
-        downloading 时才更新——不覆盖下载期间被 API 置入的 stopped。
+        成功置 done 并记录 downloadDate——下载期间被 API 置入 stopped 也如实
+        置 done：产物已落盘，状态与磁盘保持一致。失败仅把 downloading 置
+        failed，stopped 保持不动（stop 意愿优先，失败不升级为 failed）；
+        其余状态（如下载中被 requeue 竞态置回的 inQueue）一律不碰。
 
         Args:
             work_number: 作品编号。
@@ -432,12 +435,13 @@ class Downloader:
         """
         with DatabaseManager.get_db_session() as session:
             work = session.get(Works, (work_number, website))
-            if work is None or work.state != 'downloading':
+            if work is None:
                 return
             if success:
-                work.state = 'done'
-                work.downloadDate = datetime.now().isoformat(timespec='seconds')
-            else:
+                if work.state in ('downloading', 'stopped'):
+                    work.state = 'done'
+                    work.downloadDate = datetime.now().isoformat(timespec='seconds')
+            elif work.state == 'downloading':
                 work.state = 'failed'
 
     def _mark_no_downloader(self, work_number, website):

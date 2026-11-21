@@ -49,8 +49,10 @@ publish_pos (publish position)  works                          upload
 
 - `publish_pos.state`: `inQueue` ⇄ `stopped` (stopped positions are skipped by the updater).
 - `works.state` (download pipeline): `inQueue (or NULL for legacy rows) → downloading →
-  done / failed`; `stopped` can be set at any time — schedulers skip it and completion
-  callbacks never overwrite it; `downloading` leftovers from crashes are requeued at the
+  done / failed`; `stopped` can be set at any time — schedulers skip it, failure
+  completion leaves it untouched, and a successful run honestly records `done`
+  (artifacts are already on disk, so state matches the disk); `downloading`
+  leftovers from crashes are requeued at the
   start of each round.
 - Site-side work state is not stored in `state`; the updater keeps it in
   `otherInfo.siteState` (JSON).

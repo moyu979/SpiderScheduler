@@ -174,6 +174,29 @@ class ConfigManager:
                 logger.error(f"配置热重载失败（保留旧配置，下个周期重试）: {e}")
     
     @classmethod
+    def _expand_base_path(cls, value):
+        """展开配置值中的 ${BASE_PATH} 占位符，并修掉 "./"+绝对根 的组合。
+
+        占位符读运行时实例 config_manager.base_path（main.py 的 BASEPATH 覆盖
+        写在实例上；cls.base_path 是类属性默认值，实例覆盖对它不可见——容器
+        里曾因此始终展开成 ./docker）。模板惯用的 "./${BASE_PATH}/x" 在
+        BASEPATH 为绝对路径时展开成 ".//data/x"，下游 normpath/abspath 会把
+        它相对化到 CWD（产物落到 /app/data 而非 /data 卷）——紧贴绝对展开根
+        的 "./" 前缀在此剥掉，保证路径锚定 BASEPATH；BASEPATH 本身相对
+        （本地开发默认 ./docker）时展开后仍是 "./..."，维持原相对语义不变。
+
+        Args:
+            value: 含 ${BASE_PATH} 的配置值。
+
+        Returns:
+            展开后的配置值（相对 BASEPATH 的写法维持相对形式）。
+        """
+        value = value.replace('${BASE_PATH}', str(config_manager.base_path))
+        while value.startswith('./') and value[2:3] == '/':
+            value = value[2:]
+        return value
+
+    @classmethod
     def get(cls, dict_name, key):
         """获取配置值。
 
@@ -202,7 +225,7 @@ class ConfigManager:
                 raise GetUnknownKey(f"配置值不存在: {dict_name}, {key}")
             value = config_data[key]
             if isinstance(value, str) and '${BASE_PATH}' in value:
-                value = value.replace('${BASE_PATH}', str(cls.base_path))
+                value = cls._expand_base_path(value)
             return value
         
     @classmethod
@@ -241,7 +264,7 @@ class ConfigManager:
                 raise GetUnknownKey(
                     f"配置键不存在: {section}.site.{website}.{key}（site 下现有: {available}）")
         if isinstance(value, str) and '${BASE_PATH}' in value:
-            value = value.replace('${BASE_PATH}', str(cls.base_path))
+            value = cls._expand_base_path(value)
         return value
 
     @classmethod

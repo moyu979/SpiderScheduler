@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from src.config.config import ConfigManager, GetUnknownKey
+from src.config.config import ConfigManager, GetUnknownKey, config_manager
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +47,44 @@ def test_base_path_placeholder_replaced():
     """测试配置值中的 ${BASE_PATH} 占位符被替换为当前 base_path。"""
     ConfigManager.config_dict["demo"] = {"p": "./${BASE_PATH}/datas"}
     assert ConfigManager.get("demo", "p") == f"./{ConfigManager.base_path}/datas"
+
+
+def test_base_path_absolute_anchored():
+    """BASEPATH 为绝对路径时 "./${BASE_PATH}/x" 必须锚定 BASEPATH，而非相对 CWD。
+
+    两层缺陷各测一面：占位符必须读运行时实例（main.py 的 BASEPATH 覆盖写在
+    config_manager 实例上，cls.base_path 类属性对它不可见，曾导致容器里始终
+    展开成 ./docker）；模板惯用写法展开成 ".//data/x" 后，normpath/abspath
+    会把它相对化到 CWD——紧贴绝对展开根的 "./" 前缀应被剥掉。相对 BASEPATH
+    （本地开发默认 ./docker）保持原语义。
+
+    实例属性用 try/finally 手动管理：monkeypatch 对"原本不存在、经类属性
+    回退可见"的实例属性做还原时会把它固化为实例属性，永久遮蔽类属性。
+    """
+    ConfigManager.config_dict["demo2"] = {
+        "dot": "./${BASE_PATH}/datas/download",
+        "plain": "${BASE_PATH}/datas",
+    }
+    try:
+        # 相对 BASEPATH（默认 ./docker，经类属性回退）：相对语义不变
+        assert ConfigManager.get("demo2", "dot") == "././docker/datas/download"
+
+        # 模拟 main.py 的启动覆盖：写在实例上，类属性保持默认不动
+        assert "base_path" not in config_manager.__dict__  # 前置：无实例属性
+        config_manager.base_path = "/data"
+        assert ConfigManager.get("demo2", "dot") == "/data/datas/download"
+        assert ConfigManager.get("demo2", "plain") == "/data/datas"
+
+        # site_setting 通路同样生效
+        ConfigManager.config_dict["download"] = {
+            "site": {"smoke": {"download_path": "./${BASE_PATH}/dl"}}}
+        assert ConfigManager.site_setting("download", "smoke", "download_path") == "/data/dl"
+    finally:
+        config_manager.__dict__.pop("base_path", None)   # 删实例属性，恢复类属性回退
+        ConfigManager.config_dict.pop("download", None)
+
+    # 还原后回退到类属性默认值
+    assert ConfigManager.get("demo2", "dot") == "././docker/datas/download"
 
 
 def test_env_override_memory_only(monkeypatch, tmp_path):

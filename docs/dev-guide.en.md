@@ -179,7 +179,9 @@ pools shut down when their runner exits.
 - `_apply_env_overrides()`: replayed after every file reload, memory-only — env always wins
   over files and is never written back.
 - `ConfigManager.get(dict_name, key)`: RLock; unknown keys raise `GetUnknownKey`; `${BASE_PATH}`
-  in string values is replaced with the work directory.
+  in string values is replaced with the runtime work directory (read from the config_manager
+  instance, so BASEPATH overrides apply; a `./` prefix glued to an absolute expansion is
+  stripped, so `"./${BASE_PATH}/x"` anchors at `/data` in containers instead of the CWD).
 - `replace_section()`: the write path behind the System-tab config editor (root must be a
   mapping, section must already exist, atomic disk write).
 - `site_setting(website, key)` (Downloader): `download.yaml`'s `site.<website> > site.default > code fallback`; override values get `${BASE_PATH}` replacement too.

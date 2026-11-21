@@ -157,7 +157,8 @@ _site_loop：站点级 do_download 关闭即退出（恢复后守护线程重拉
   无空窗；目录缺失时旧配置保留）。单个文件解析失败只丢该段并记日志。
 - `_apply_env_overrides()`：每次文件重载后重放，仅内存、不回写 —— env 覆盖永远压过文件。
 - `ConfigManager.get(dict_name, key)`：RLock；键不存在抛 `GetUnknownKey`；字符串值中的
-  `${BASE_PATH}` 统一替换为工作目录。
+  `${BASE_PATH}` 统一替换为运行时工作目录（读 config_manager 实例，BASEPATH 覆盖生效；
+  紧贴绝对展开根的 `./` 前缀会被剥掉，`"./${BASE_PATH}/x"` 在容器里锚定 `/data` 而非 CWD）。
 - `replace_section()`：系统页配置编辑的写路径（校验根节点为映射、段必须已存在、原子写盘）。
 - `site_setting(website, key)`（Downloader）：`download.yaml` 的 `site.<website> >
   site.default > 代码内置兜底`，覆盖值同样做 `${BASE_PATH}` 替换。

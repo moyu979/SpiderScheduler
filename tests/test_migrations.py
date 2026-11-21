@@ -78,6 +78,43 @@ def test_old_user_table_migrated_to_publish_pos(tmp_path):
         engine.dispose()
 
 
+def test_migration_0003_adds_final_path(tmp_path):
+    """v2 库 → v3：works 补 finalPath 列，直接重放与全链迁移都幂等"""
+    engine = create_engine(f"sqlite:///{tmp_path / 'v2.db'}")
+    db_module.DatabaseManager.engine = engine
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('''
+                CREATE TABLE works (
+                    "workNumber" VARCHAR NOT NULL, website VARCHAR NOT NULL,
+                    "upTime" VARCHAR, title VARCHAR, kind VARCHAR, state VARCHAR,
+                    "downloadDate" VARCHAR, "downloadPriority" INTEGER, "otherInfo" VARCHAR,
+                    downloadInfo VARCHAR, PRIMARY KEY ("workNumber", website))'''))
+            conn.execute(text("INSERT INTO works VALUES ('w1', 'pixiv', '', 't', 'k', 'done', NULL, 0, NULL, NULL)"))
+            conn.execute(text("CREATE TABLE schema_version (version INTEGER NOT NULL)"))
+            conn.execute(text("INSERT INTO schema_version VALUES (2)"))
+
+        migration = _load_migration("0003_add_works_final_path.py", "mig_0003")
+        migration.apply(engine)
+        migration.apply(engine)  # 模拟崩溃后重放：不应抛错
+
+        with engine.begin() as conn:
+            cols = {r[1] for r in conn.execute(text('PRAGMA table_info("works")'))}
+            assert "finalPath" in cols
+            rows = conn.execute(text('SELECT "workNumber", finalPath FROM works')).fetchall()
+            assert rows == [("w1", None)]  # 旧数据留 NULL
+
+        # 全链迁移也能从 v2 补跑到 HEAD
+        Base.metadata.create_all(engine)
+        db_module.DatabaseManager._run_migrations(is_new=False)
+        with engine.begin() as conn:
+            version = conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar()
+        assert version == db_module.HEAD_SCHEMA_VERSION
+    finally:
+        db_module.DatabaseManager.engine = None
+        engine.dispose()
+
+
 def test_sqlite_pragmas_applied(tmp_path):
     """连接级 PRAGMA：外键开启、busy_timeout 设置、WAL 生效"""
     engine = create_engine(f"sqlite:///{tmp_path / 'pragma.db'}")
@@ -124,10 +161,15 @@ def _create_v1_db(engine):
 
 
 def _load_migration_0002():
+    return _load_migration("0002_rename_user_to_publish_pos.py", "mig_0002_idem")
+
+
+def _load_migration(filename, module_id):
+    """按文件名加载 migrations/ 下的迁移模块。"""
     import importlib.util
     from pathlib import Path
-    path = Path(db_module.__file__).parent / "migrations" / "0002_rename_user_to_publish_pos.py"
-    spec = importlib.util.spec_from_file_location("mig_0002_idem", path)
+    path = Path(db_module.__file__).parent / "migrations" / filename
+    spec = importlib.util.spec_from_file_location(module_id, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

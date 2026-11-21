@@ -287,7 +287,10 @@ default)` (e.g. site-specific per-round output caps); changes hot-reload.
 `inQueue (or NULL, legacy data) → downloading → done / failed`;
 `stopped` may be set via API at any time (skipped by scheduling; failure
 completion leaves it untouched, success completion records `done`);
-`noDownloader` suspension see §3.4;
+`noDownloader` suspension see §3.4; a successful run also records the artifact
+path (relative to the site-level final download root) in `finalPath`, used by
+the works page artifact column and `GET /api/download/work_file` tar streaming
+(moved files surface as "missing" — the record is never cleared);
 `downloading` leftovers from a crashed process are reset to `inQueue` at each
 round start.
 

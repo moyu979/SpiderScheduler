@@ -10,12 +10,15 @@
 - 分页：limit（默认 50，上限 500）/ offset；排序字段走白名单
 """
 
+import os
+
 from flask import Blueprint, request, jsonify
 from sqlalchemy import exists, func, or_, tuple_
 
 from src.utils.logging.logger import SpiderLogger as logger
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import Works, PublishPos, Upload
+from src.service.downloader import Downloader
 
 WORK_DATE_FIELDS = {'upTime': Works.upTime, 'downloadDate': Works.downloadDate}
 WORK_SORT_FIELDS = {
@@ -178,6 +181,32 @@ def _err(message, code=400):
     return jsonify({'success': False, 'error': message}), code
 
 
+def _artifact_exists(website, final_path):
+    """探测作品产物在当前站点下载根下是否真实存在。
+
+    用户手动移走文件时不清 finalPath，这里按当前配置实时探测，供 UI 标记
+    "不存在"；移回后无需任何操作自动恢复。路径越界（DB 被改出下载根）视为
+    不存在。
+
+    Args:
+        website: 站点名。
+        final_path: works.finalPath（相对站点级下载根）。
+
+    Returns:
+        bool: 产物路径存在且在下载根之内。
+    """
+    if not final_path:
+        return False
+    try:
+        root = Downloader.site_download_root(website)
+        target = os.path.normpath(os.path.join(root, final_path))
+        if target != root and not target.startswith(root + os.sep):
+            return False
+        return os.path.exists(target)
+    except Exception:
+        return False
+
+
 class QueryApi:
     """只读查询端点：作品/位点的组合筛选列表与站点×状态计数统计。
 
@@ -202,7 +231,8 @@ class QueryApi:
 
             Returns:
                 JSON：success、total、limit、offset 与 items（作品字段，
-                otherInfo 可解析时附带 siteState）；排序/日期字段非法 400，
+                otherInfo 可解析时附带 siteState；finalPath 非空时附
+                pathExists 实时探测产物是否还在）；排序/日期字段非法 400，
                 查询异常 500。
             """
             try:
@@ -239,6 +269,8 @@ class QueryApi:
                             'downloadPriority': w.downloadPriority,
                             'downloadInfo': _safe_json(w.downloadInfo),
                             'otherInfo': _safe_json(w.otherInfo),
+                            'finalPath': w.finalPath,
+                            'pathExists': _artifact_exists(w.website, w.finalPath),
                         }
                         if isinstance(item['otherInfo'], dict):
                             item['siteState'] = item['otherInfo'].get('siteState')

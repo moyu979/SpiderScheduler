@@ -33,6 +33,10 @@ class Works(Base):
         downloadPriority: 下载优先级，认领时按其降序取最前。
         otherInfo: 源站附加信息（JSON 文本，含 siteState）。
         downloadInfo: 统一下载参数（JSON 文本），下载时反序列化传给脚本。
+        finalPath: 成功下载的产物路径，相对站点级最终下载根（<download_path>/
+            <website>/，如 "<作品子目录>" 或 "<作品子目录>/<文件>"）。成功收尾时
+            由框架写入；requeue 重下成功会覆盖。文件被手动移走不清此列——
+            下载端点报"产物不存在"，移回后立即可用。旧数据与失败任务为 NULL。
         uploads: 与 Upload 的只读导航关系（写入统一显式构造 Upload）。
     """
 
@@ -51,6 +55,7 @@ class Works(Base):
     downloadPriority = Column(Integer, default=0)
     otherInfo = Column(String)
     downloadInfo = Column(String)  # 统一下载参数，JSON 文本
+    finalPath = Column(String)  # 成功产物路径，相对站点级最终下载根；旧数据/失败为 NULL
 
     # 与 upload 关联（只读导航；写入统一显式构造 Upload，避免两条复合外键共享 website 列的写方向歧义）
     uploads = relationship("Upload", back_populates="work", viewonly=True)

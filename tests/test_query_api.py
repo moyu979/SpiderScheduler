@@ -1,10 +1,11 @@
-"""查询 API 测试：组合筛选、分页排序白名单与统计端点。
+"""查询 API 测试：组合筛选、分页排序白名单、产物路径探测与统计端点。
 """
 import pytest
 from flask import Flask
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from src.config.config import ConfigManager
 from src.server.apis.query_api import QueryApi
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import Base, PublishPos, Works, Upload
@@ -115,6 +116,38 @@ def test_works_rejects_unknown_sort_field(client):
     """测试白名单外的排序字段返回 400。"""
     resp = client.get("/api/query/works?sort=1;drop")
     assert resp.status_code == 400
+
+
+def test_works_final_path_flag(tmp_path):
+    """finalPath 非空时随条目返回 pathExists 实时探测：在为 True，移走/无路径为 False"""
+    root = tmp_path / "dl"
+    (root / "pixiv" / "w2").mkdir(parents=True)
+    (root / "pixiv" / "w2" / "img.bin").write_text("A")
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'q2.db'}")
+    Base.metadata.create_all(engine)
+    DatabaseManager.engine = engine
+    DatabaseManager.SessionLocal = sessionmaker(bind=engine)
+    ConfigManager.config_dict["download"] = {"site": {"default": {"download_path": str(root)}}}
+    try:
+        with DatabaseManager.get_db_session() as s:
+            s.add_all([
+                Works(workNumber="w2", website="pixiv", state="done", finalPath="w2"),
+                Works(workNumber="w3", website="pixiv", state="done", finalPath="gone"),
+                Works(workNumber="w1", website="pixiv", state="inQueue"),
+            ])
+        app = Flask(__name__)
+        app.register_blueprint(QueryApi().blueprint)
+        data = app.test_client().get("/api/query/works").get_json()
+        by_id = {i["workNumber"]: i for i in data["items"]}
+        assert by_id["w2"]["finalPath"] == "w2" and by_id["w2"]["pathExists"] is True
+        assert by_id["w3"]["finalPath"] == "gone" and by_id["w3"]["pathExists"] is False
+        assert by_id["w1"]["finalPath"] is None and by_id["w1"]["pathExists"] is False
+    finally:
+        ConfigManager.config_dict.pop("download", None)
+        DatabaseManager.engine = None
+        DatabaseManager.SessionLocal = None
+        engine.dispose()
 
 
 def test_positions_filters_and_work_counts(client):

@@ -33,7 +33,7 @@ Key decisions and their rationale:
 ## 2. Data Model
 
 All three tables are keyed by `website` (migration history: v1 multiWeb initial schema;
-v2 renamed user→publish_pos).
+v2 renamed user→publish_pos; v3 added works.finalPath).
 
 ```
 publish_pos (publish position)  works                          upload
@@ -43,6 +43,7 @@ publish_pos (publish position)  works                          upload
   state                        state / downloadDate           (many-to-many link)
                                downloadPriority
                                otherInfo / downloadInfo
+                               finalPath (artifact path of successful downloads)
 ```
 
 ### 2.1 State Machines

@@ -388,6 +388,17 @@ function renderWorks(data) {
       canStop ? `<button class="ghost" data-act="stop" data-w="${esc(w.workNumber)}" data-site="${esc(w.website)}">停止</button>` : '',
       canRequeue ? `<button class="ghost" data-act="requeue" data-w="${esc(w.workNumber)}" data-site="${esc(w.website)}">重排</button>` : '',
     ].join('');
+    // 产物列：有记录路径时展示（截断悬停看全貌）；仍存在出"下载"，已移走标"不存在"
+    const pathCode = w.finalPath
+      ? `<span title="${esc(w.finalPath)}"><code>${esc(w.finalPath).slice(0, 32)}${w.finalPath.length > 32 ? '…' : ''}</code></span>`
+      : '';
+    const pathBtn = w.finalPath && w.pathExists
+      ? ` <button class="ghost" data-act="fetch" data-w="${esc(w.workNumber)}" data-site="${esc(w.website)}">下载</button>`
+      : '';
+    const pathMark = w.finalPath && !w.pathExists
+      ? ' <span class="hint" style="color:#b91c1c" title="产物不在记录的路径下（可能已被移动或删除）；移回原处后可直接下载">不存在</span>'
+      : '';
+    const pathCell = w.finalPath ? `${pathCode}${pathBtn}${pathMark}` : '<span class="muted">—</span>';
     return `<tr>
       <td><code>${esc(w.workNumber)}</code></td>
       <td>${esc(w.website)}</td>
@@ -399,13 +410,14 @@ function renderWorks(data) {
       <td>${esc(w.upTime ?? '—')}</td>
       <td>${esc(w.downloadDate ?? '—')}</td>
       <td>${fmtInfo(w.downloadInfo)}</td>
+      <td>${pathCell}</td>
       <td class="actions">${acts || '<span class="muted">—</span>'}</td>
     </tr>`;
   }).join('');
   $('table').innerHTML = `<thead><tr>
       <th>作品号</th><th>站点</th><th>标题</th><th>类型</th><th>状态</th><th>源站状态</th>
-      <th>优先级</th><th>上传时间</th><th>下载时间</th><th>下载参数</th><th>操作</th>
-    </tr></thead><tbody>${rows || `<tr><td colspan="11" class="empty">无匹配数据</td></tr>`}</tbody>`;
+      <th>优先级</th><th>上传时间</th><th>下载时间</th><th>下载参数</th><th>产物</th><th>操作</th>
+    </tr></thead><tbody>${rows || `<tr><td colspan="12" class="empty">无匹配数据</td></tr>`}</tbody>`;
   renderPager(data);
 }
 
@@ -654,6 +666,18 @@ $('table').addEventListener('click', async (e) => {
   }
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
+  if (btn.dataset.act === 'fetch') {
+    // 产物 tar 下载：交给浏览器原生下载流（大文件友好，不占 JS 内存）；
+    // 产物已被移走时服务端返回带说明的 404，浏览器直接展示
+    const a = document.createElement('a');
+    a.href = `/api/download/work_file?workNumber=${encodeURIComponent(btn.dataset.w)}`
+      + `&website=${encodeURIComponent(btn.dataset.site)}`;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return;
+  }
   const body = { workNumber: btn.dataset.w, website: btn.dataset.site };
   btn.disabled = true;
   try {

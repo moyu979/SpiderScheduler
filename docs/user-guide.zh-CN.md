@@ -67,6 +67,9 @@ docker/                          ← BASEPATH
   `stopped/failed/done` 的作品可"重新入队"（state→inQueue）。
   `noDownloader`（无下载器）是挂起状态：站点暂无下载脚本的作品不标失败，上传对应站点的
   下载脚本后会自动重新入队。
+- **产物列**：成功下载的作品记录产物路径（相对站点下载根，旧数据无记录显示"—"），
+  点"下载"把整个作品目录打成 tar.gz 从浏览器拉取。文件被手动移走时该行标红"不存在"
+  （路径保留，移回原处即可再下，无需任何操作）。
 
 ### 2.2 位点
 
@@ -226,6 +229,8 @@ class DownloadWork:
 - `use_cache: false`，或 `cache_path` 与 `download_path` 配成同一目录：视为未配独立
   缓存层，脚本产物原地保留，不做搬运。
 - 两种模式脚本代码完全一致，切换开关不改脚本。
+- 成功下载后框架把产物路径记入作品的 `finalPath`（相对 `download_path/<站点>/`），
+  作品页"产物"列据此提供 tar.gz 打包下载；文件被手动移走只报"不存在"，不删记录。
 
 ## 6. REST API 参考
 
@@ -238,6 +243,7 @@ class DownloadWork:
 | `POST /api/update/update_now` | `{authorId, website?}` 立即更新单个位点（后台执行）；`GET /api/update/update_now/status` 查询状态 |
 | `POST /api/download/add_work` | `{workNumber, website?, downloadInfo?}` 作品入队 |
 | `POST /api/download/stop_work` / `requeue_work` | 停止 / 重新入队 |
+| `GET /api/download/work_file` | `{workNumber, website}` 产物 tar.gz 流式下载（产物被移走 404，路径记录保留） |
 | `GET /api/query/works` | 组合筛选作品：`website`(逗号多选)、`state`(逗号多选，`none`=NULL)、`author`、`date_field`+`date_from`+`date_to`、`keyword`、`sort`、`order`、`limit`、`offset` |
 | `GET /api/query/positions` | 组合筛选位点（附 `workCount`） |
 | `GET /api/query/stats` | 站点×状态计数（页面统计条数据源） |

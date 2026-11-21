@@ -1,6 +1,10 @@
-"""下载队列测试：认领/收尾/重排语义、缓存交付、时间窗口与线程池行为。
+"""下载队列测试：认领/收尾/重排语义、缓存交付、产物路径记录、tar 下载端点、
+时间窗口与线程池行为。
 """
+import io
 import os
+import shutil
+import tarfile
 from datetime import datetime
 from threading import Thread
 
@@ -109,31 +113,51 @@ def test_finish_success_overwrites_stopped(db):
 
 
 def test_finish_failure_keeps_stopped(db):
-    """测试失败收尾不覆盖人工置入的 stopped（stop 意愿优先，不升级为 failed）。"""
-    _add(workNumber="W", website="pixiv", state="inQueue")
+    """测试失败收尾不覆盖人工置入的 stopped，也不动已记录的 finalPath。"""
+    _add(workNumber="W", website="pixiv", state="inQueue", finalPath="W")
     d = Downloader()
     d._claim_next_work('pixiv')
     with DatabaseManager.get_db_session() as s:
         s.get(Works, ("W", "pixiv")).state = "stopped"
 
-    d._finish_work("W", "pixiv", success=False)
+    d._finish_work("W", "pixiv", success=False, final_rel="NEW")
 
     assert _state("W") == "stopped"
+    with DatabaseManager.get_db_session() as s:
+        assert s.get(Works, ("W", "pixiv")).finalPath == "W"  # 旧路径保留
 
 
 def test_finish_does_not_touch_requeued(db):
-    """测试下载中被 requeue 竞态置回 inQueue 时，收尾不覆盖重排意图。"""
+    """测试下载中被 requeue 竞态置回 inQueue 时，收尾不覆盖重排意图与路径。"""
     _add(workNumber="W", website="pixiv", state="inQueue")
     d = Downloader()
     d._claim_next_work('pixiv')
     with DatabaseManager.get_db_session() as s:
         s.get(Works, ("W", "pixiv")).state = "inQueue"
 
-    d._finish_work("W", "pixiv", success=True)
+    d._finish_work("W", "pixiv", success=True, final_rel="W")
     assert _state("W") == "inQueue"
+    with DatabaseManager.get_db_session() as s:
+        assert s.get(Works, ("W", "pixiv")).finalPath is None
 
     d._finish_work("W", "pixiv", success=False)
     assert _state("W") == "inQueue"
+
+
+def test_finish_records_final_path_on_success(db):
+    """测试成功收尾把产物路径写入 finalPath（stopped 期间成功同样记录）。"""
+    _add(workNumber="W", website="pixiv", state="inQueue")
+    d = Downloader()
+    d._claim_next_work('pixiv')
+    with DatabaseManager.get_db_session() as s:
+        s.get(Works, ("W", "pixiv")).state = "stopped"  # 下载期间被 stop
+
+    d._finish_work("W", "pixiv", success=True, final_rel="W/sub")
+
+    with DatabaseManager.get_db_session() as s:
+        w = s.get(Works, ("W", "pixiv"))
+        assert w.state == "done"
+        assert w.finalPath == "W/sub"
 
 
 def test_requeue_stale_downloading(db):
@@ -161,6 +185,85 @@ def test_requeue_api_endpoint(db):
 
     resp = client.post("/api/download/requeue_work", json={"workNumber": "ghost", "website": "pixiv"})
     assert resp.status_code == 404
+
+
+def test_work_file_streams_tar_gz(db, tmp_path):
+    """work_file 端点：产物在 → tar.gz 附件流可解包出文件"""
+    root = tmp_path / "dl"
+    work_dir = root / "pixiv" / "W"
+    work_dir.mkdir(parents=True)
+    (work_dir / "img.bin").write_text("DATA")
+    ConfigManager.config_dict["download"] = {"site": {"default": {"download_path": str(root)}}}
+
+    _add(workNumber="W", website="pixiv", state="done", finalPath="W")
+    app = Flask(__name__)
+    app.register_blueprint(DownloadApi().blueprint)
+    client = app.test_client()
+    try:
+        resp = client.get("/api/download/work_file?workNumber=W&website=pixiv")
+        assert resp.status_code == 200
+        assert "gzip" in resp.headers["Content-Type"]
+        assert "attachment" in resp.headers["Content-Disposition"]
+        with tarfile.open(fileobj=io.BytesIO(resp.data), mode="r:gz") as tar:
+            names = tar.getnames()
+            assert any(n.startswith("W/") and n.endswith("img.bin") for n in names)
+            content = tar.extractfile(
+                next(n for n in names if n.endswith("img.bin"))).read()
+        assert content == b"DATA"
+    finally:
+        ConfigManager.config_dict.pop("download", None)
+
+
+def test_work_file_missing_artifact_keeps_path(db, tmp_path):
+    """产物被手动移走 → 404 说明，finalPath 保留（移回后可直接再下）"""
+    root = tmp_path / "dl"
+    (root / "pixiv").mkdir(parents=True)
+    ConfigManager.config_dict["download"] = {"site": {"default": {"download_path": str(root)}}}
+
+    _add(workNumber="W", website="pixiv", state="done", finalPath="W")
+    app = Flask(__name__)
+    app.register_blueprint(DownloadApi().blueprint)
+    client = app.test_client()
+    try:
+        resp = client.get("/api/download/work_file?workNumber=W&website=pixiv")
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert not data["success"] and "产物不存在" in data["error"]
+
+        with DatabaseManager.get_db_session() as s:
+            assert s.get(Works, ("W", "pixiv")).finalPath == "W"  # 不清路径
+    finally:
+        ConfigManager.config_dict.pop("download", None)
+
+
+def test_work_file_rejects_escape_and_no_path(db, tmp_path):
+    """finalPath 越界（.. 逃逸）、无产物路径、作品不存在都 404"""
+    root = tmp_path / "dl"
+    (root / "pixiv").mkdir(parents=True)
+    ConfigManager.config_dict["download"] = {"site": {"default": {"download_path": str(root)}}}
+
+    _add(workNumber="E", website="pixiv", state="done", finalPath="../evil")
+    _add(workNumber="N", website="pixiv", state="done")
+    app = Flask(__name__)
+    app.register_blueprint(DownloadApi().blueprint)
+    client = app.test_client()
+    try:
+        resp = client.get("/api/download/work_file?workNumber=E&website=pixiv")
+        assert resp.status_code == 404
+        assert "越界" in resp.get_json()["error"]
+
+        resp = client.get("/api/download/work_file?workNumber=N&website=pixiv")
+        assert resp.status_code == 404
+        assert "没有已记录的产物路径" in resp.get_json()["error"]
+
+        resp = client.get("/api/download/work_file?workNumber=ghost&website=pixiv")
+        assert resp.status_code == 404
+        assert resp.get_json()["error"].startswith("作品 ghost")
+
+        resp = client.get("/api/download/work_file")   # 缺 workNumber
+        assert resp.status_code == 400
+    finally:
+        ConfigManager.config_dict.pop("download", None)
 
 
 # ---------- 无下载脚本挂起（noDownloader）与刷回 ----------
@@ -449,6 +552,78 @@ def test_cache_on_without_payload_marks_failed(db, cache_env, monkeypatch):
     _run_with(d, FakeNoneWorker, monkeypatch)
 
     assert _state("W") == "failed"                    # 缓存模式必须返回产物路径
+
+
+# ---------- 产物路径记录（works.finalPath） ----------
+
+def test_deliver_same_root_returns_final_path(tmp_path):
+    """两层一致时交付不再返回 None，而是产物最终路径（finalPath 落库依据）"""
+    root = tmp_path / "dl"
+    site = root / "pixiv"
+    (site / "W").mkdir(parents=True)
+    (site / "W" / "a.bin").write_text("A")
+
+    d = Downloader()
+    dest = d._deliver_to_final(str(root), str(root), "W/a.bin", "pixiv")
+
+    assert os.path.samefile(dest, site / "W" / "a.bin")
+    assert (site / "W" / "a.bin").exists()            # 原地保留
+
+
+def test_deliver_same_root_validates_payload(tmp_path):
+    """两层一致时与缓存模式同等校验：不存在/越界/站点根本身都拒绝"""
+    root = tmp_path / "dl"
+    (root / "pixiv").mkdir(parents=True)
+
+    d = Downloader()
+    with pytest.raises(RuntimeError):
+        d._deliver_to_final(str(root), str(root), "ghost.bin", "pixiv")   # 不存在
+    with pytest.raises(RuntimeError):
+        d._deliver_to_final(str(root), str(root), "../outside.bin", "pixiv")  # 越界
+    with pytest.raises(RuntimeError):
+        d._deliver_to_final(str(root), str(root), ".", "pixiv")           # 站点根本身
+
+
+def test_run_task_records_final_path_cache_mode(db, cache_env, monkeypatch):
+    """缓存模式成功收尾：finalPath 记产物目录相对站点最终根的路径"""
+    _add(workNumber="W", website="pixiv", state="downloading")
+    d = Downloader()
+    _run_with(d, FakeWorker, monkeypatch)
+
+    with DatabaseManager.get_db_session() as s:
+        w = s.get(Works, ("W", "pixiv"))
+        assert w.state == "done" and w.downloadDate
+        assert w.finalPath == "W"
+
+
+def test_run_task_records_final_path_no_cache(db, tmp_path, monkeypatch):
+    """关闭缓存直写最终目录时同样记录 finalPath"""
+    ConfigManager.config_dict["download"] = {
+        "site": {"default": {"use_cache": False,
+                             "download_path": str(tmp_path / "final"),
+                             "waiting_play": False, "sleep_second": 0}},
+    }
+    try:
+        _add(workNumber="W", website="pixiv", state="downloading")
+        d = Downloader()
+        _run_with(d, FakeWorker, monkeypatch)
+
+        with DatabaseManager.get_db_session() as s:
+            w = s.get(Works, ("W", "pixiv"))
+            assert w.state == "done"
+            assert w.finalPath == "W"
+    finally:
+        ConfigManager.config_dict.pop("download", None)
+
+
+def test_run_task_overwrites_final_path_on_redownload(db, cache_env, monkeypatch):
+    """requeue 重下成功覆盖旧 finalPath（整体替换语义下目录被搬新）"""
+    _add(workNumber="W", website="pixiv", state="downloading", finalPath="OLD")
+    d = Downloader()
+    _run_with(d, FakeWorker, monkeypatch)
+
+    with DatabaseManager.get_db_session() as s:
+        assert s.get(Works, ("W", "pixiv")).finalPath == "W"
 
 
 # ---------- 每站点独立配置 ----------

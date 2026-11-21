@@ -21,7 +21,8 @@ site.<website> > site.default > 代码内置兜底）；根键 do_download 是�
     子目录，download_it 返回产物路径（相对该根或绝对路径均可）。
     交付：cache_path 与 download_path 不一致时，框架按相对层级把产物搬到
     download_path/<website>/ 下并清理该作品在缓存侧的残留；两层一致（未配
-    独立缓存层）时无需搬运，产物原地保留。
+    独立缓存层）时无需搬运，产物原地保留。成功收尾把产物目录相对站点级
+    最终下载根的路径记入 works.finalPath（作品页展示与 tar 下载端点用）。
 """
 
 import calendar
@@ -90,6 +91,20 @@ class Downloader:
             解析后的配置值。
         """
         return ConfigManager.site_setting('download', website, key, default)
+
+    @classmethod
+    def site_download_root(cls, website):
+        """站点级最终下载根 <download_path>/<website>/：finalPath 的基准目录。
+
+        Args:
+            website: 站点名。
+
+        Returns:
+            str: 归一化后的绝对路径。
+        """
+        return os.path.normpath(os.path.abspath(os.path.join(
+            cls.site_setting(website, 'download_path', _default_download_path()),
+            website)))
 
     # ---------------- 可下载时间窗口 ----------------
 
@@ -420,18 +435,21 @@ class Downloader:
                 'downloadInfo': work.downloadInfo,
             }
 
-    def _finish_work(self, work_number, website, success):
-        """任务收尾：回写作品状态。
+    def _finish_work(self, work_number, website, success, final_rel=None):
+        """任务收尾：回写作品状态与产物路径。
 
         成功置 done 并记录 downloadDate——下载期间被 API 置入 stopped 也如实
-        置 done：产物已落盘，状态与磁盘保持一致。失败仅把 downloading 置
-        failed，stopped 保持不动（stop 意愿优先，失败不升级为 failed）；
-        其余状态（如下载中被 requeue 竞态置回的 inQueue）一律不碰。
+        置 done：产物已落盘，状态与磁盘保持一致；final_rel 非空时写入
+        finalPath（产物相对站点级最终下载根的路径，重下成功覆盖旧值）。
+        失败仅把 downloading 置 failed，stopped 保持不动（stop 意愿优先，
+        失败不升级为 failed），也不写 finalPath；其余状态（如下载中被
+        requeue 竞态置回的 inQueue）一律不碰。
 
         Args:
             work_number: 作品编号。
             website: 站点名。
             success: 下载是否成功。
+            final_rel: 成功时产物相对站点级最终下载根的路径，None 表示未知。
         """
         with DatabaseManager.get_db_session() as session:
             work = session.get(Works, (work_number, website))
@@ -441,6 +459,8 @@ class Downloader:
                 if work.state in ('downloading', 'stopped'):
                     work.state = 'done'
                     work.downloadDate = datetime.now().isoformat(timespec='seconds')
+                    if final_rel is not None:
+                        work.finalPath = final_rel
             elif work.state == 'downloading':
                 work.state = 'failed'
 
@@ -558,7 +578,8 @@ class Downloader:
         约定（与脚本模板一致）：
         - 脚本拿到的是站点级下载根 <cache_root>/<website>/，作品子目录由脚本自建；
         - payload 为产物路径，相对站点根或绝对路径均可；
-        - cache_root 与 download_root 一致（未配独立缓存层）时无需搬运，返回 None；
+        - cache_root 与 download_root 一致（未配独立缓存层）时无需搬运，产物原地
+          保留，返回其最终路径（payload 为空时返回 None）；
         - 否则按相对层级搬到 <download_root>/<website>/<rel>，并清理该作品在
           缓存侧的顶层残留（脚本可能产出 payload 之外的伴生文件，如弹幕 xml）；
         - merge 开且目的地已有同名目录时按增量合并搬运：逐文件并入（同名覆盖）、
@@ -574,14 +595,13 @@ class Downloader:
                 false=整体替换（目的地整个目录清空后搬入）。
 
         Returns:
-            str | None: 产物最终落到的路径；无需搬运时 None。
+            str | None: 产物最终落到的归一化绝对路径；payload 为空时 None。
 
         Raises:
             RuntimeError: payload 指向站点根本身、不在缓存根之下或路径不存在。
         """
-        if os.path.normpath(os.path.abspath(cache_root)) \
-                == os.path.normpath(os.path.abspath(download_root)):
-            return None  # 未配独立缓存层：脚本产物已在最终根下，原地保留
+        if not payload:
+            return None  # 无产物可定位；缓存模式由调用方先行拦截报错
         cache_site = os.path.normpath(os.path.abspath(os.path.join(cache_root, website)))
         src = os.path.normpath(payload if os.path.isabs(payload)
                                else os.path.join(cache_site, payload))
@@ -593,6 +613,9 @@ class Downloader:
         if rel.split(os.sep)[0] == os.pardir:
             raise RuntimeError(f"产物路径 {payload} 不在缓存下载根 {cache_site} 之下，无法搬运")
         dest = os.path.normpath(os.path.join(download_root, website, rel))
+        if os.path.normpath(os.path.abspath(cache_root)) \
+                == os.path.normpath(os.path.abspath(download_root)):
+            return dest  # 未配独立缓存层：产物已在最终根下，原地保留
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if os.path.isdir(src):
             if os.path.exists(dest):
@@ -621,9 +644,9 @@ class Downloader:
 
         流程：读站点配置 → 解析 downloadInfo → 分发脚本类并把站点级下载根
         交给脚本（作品子目录由脚本自建）→ 调 download_it() → 缓存层与最终层
-        不一致时搬运产物 → 回写状态 → 按站点节奏睡眠。站点无可用下载脚本
-        （ScriptRouteError）时置 noDownloader 挂起而非 failed；其余任何异常
-        都置为 failed 并记录日志。
+        不一致时搬运产物 → 回写状态与产物路径 → 按站点节奏睡眠。站点无可用
+        下载脚本（ScriptRouteError）时置 noDownloader 挂起而非 failed；其余
+        任何异常都置为 failed 并记录日志。
 
         Args:
             work_data: _claim_next_work 返回的作品快照字典。
@@ -665,15 +688,25 @@ class Downloader:
             result = downloader_instance.download_it()
             payload, duration, merge = self._parse_result(result)
 
-            if use_cache:
-                if not payload:
-                    raise RuntimeError("缓存模式下 download_it 必须返回下载产物路径")
-                dest = self._deliver_to_final(cache_root, final_root, payload,
-                                              website, merge=merge)
-                if dest:
-                    logger.info(f"产物已搬运到 {dest}")
+            if use_cache and not payload:
+                raise RuntimeError("缓存模式下 download_it 必须返回下载产物路径")
+            dest = self._deliver_to_final(cache_root, final_root, payload,
+                                          website, merge=merge)
+            if dest:
+                logger.info(f"产物最终路径: {dest}")
 
-            self._finish_work(work_number, website, success=True)
+            # finalPath：作品产物目录相对站点级最终下载根的路径（作品子目录由
+            # 脚本自建；产物为单文件时取其所在目录）。产物直接落在站点根下
+            # （无作品子目录）时不记录，避免把整站根当作品目录
+            final_rel = None
+            if dest:
+                site_root = self.site_download_root(website)
+                work_dir = os.path.normpath(os.path.abspath(
+                    dest if os.path.isdir(dest) else os.path.dirname(dest)))
+                if work_dir != site_root:
+                    final_rel = os.path.relpath(work_dir, site_root)
+
+            self._finish_work(work_number, website, success=True, final_rel=final_rel)
             logger.info(f"下载完成: {work_number}@{website}")
 
             # 任务间节奏：等待播放时优先用脚本返回的时长，否则按站点定长睡眠

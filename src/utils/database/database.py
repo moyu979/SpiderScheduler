@@ -25,7 +25,7 @@ from src.utils.database.models import Base
 #   2. 把此常量 +1
 # 全新数据库由 create_all 直接建出最新结构；旧库按版本号补跑迁移。
 # 版本历史：1 = multiWeb 初始结构；2 = user 表更名为 publish_pos（发布位点）
-HEAD_SCHEMA_VERSION = 2
+HEAD_SCHEMA_VERSION = 3
 
 
 # SQLite 连接级参数：WAL 降低读写互斥、busy_timeout 缓解并发写锁冲突、开启外键约束

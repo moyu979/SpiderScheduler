@@ -1,19 +1,106 @@
-"""下载队列管理端点：作品入队、停止、重排与下载配置更新。
+"""下载队列管理端点：作品入队、停止、重排、产物下载与下载配置更新。
 
 全部端点挂在 /api/download 前缀下，与 REPL 的作品操作共用同一批模型与
 配置写入路径，保证行为语义一致。
 """
 
+import io
 import json
-from flask import Blueprint, request, jsonify
+import os
+import tarfile
+import urllib.parse
+from queue import Empty, Full, Queue
+from threading import Event, Thread
+
+from flask import Blueprint, request, jsonify, Response
 from src.utils.logging.logger import SpiderLogger as logger
 from src.config.config import ConfigManager
+from src.service.downloader import Downloader
 from src.utils.database.database import DatabaseManager
 from src.utils.database.models import Works
 from src.config.config import GetUnknownKey
 
+_TAR_DONE = object()  # 打包流的结束哨兵
+
+
+def _tar_gz_stream(target, arcname):
+    """把 target 打成 tar.gz 并返回逐块流式响应（不落盘、不整载内存）。
+
+    后台线程以 tarfile 流模式（w|gz）写有界队列，请求线程的生成器逐块排空
+    ——产物普遍是已压缩媒体，compresslevel 取 1 省下的 CPU 远比压缩率重要。
+    客户端断开时生成器提前关闭并置 aborted，写线程 put 超时感知后虚写放行
+    tar 收尾退出，不泄漏线程。
+
+    Args:
+        target: 待打包的产物目录或文件（绝对路径）。
+        arcname: 归档内顶层条目名。
+
+    Returns:
+        Response: application/gzip 附件流。
+    """
+    q = Queue(maxsize=32)
+    aborted = Event()
+
+    class _QueueSink(io.RawIOBase):
+        """tarfile 流模式的写入端：字节块塞进有界队列，塞满即背压。"""
+
+        def writable(self):
+            return True
+
+        def write(self, b):
+            data = bytes(b)
+            while True:
+                try:
+                    q.put(data, timeout=1)
+                    return len(data)
+                except Full:
+                    if aborted.is_set():
+                        return len(data)  # 下游已断开：虚写让 tar 收尾退出
+
+        def close(self):
+            pass  # 队列生命周期由本函数管理，tarfile 关闭不落队列
+
+    def _produce():
+        try:
+            with tarfile.open(fileobj=_QueueSink(), mode='w|gz', compresslevel=1) as tar:
+                tar.add(target, arcname=arcname)
+        except Exception as e:
+            logger.warning(f"产物打包流异常: {e}")
+        finally:
+            for _ in range(10):
+                try:
+                    q.put(_TAR_DONE, timeout=1)
+                    break
+                except Full:
+                    if aborted.is_set():
+                        break  # 生成器已关闭，无人消费，直接退出
+
+    def _generate():
+        try:
+            while True:
+                try:
+                    chunk = q.get(timeout=5)
+                except Empty:
+                    continue
+                if chunk is _TAR_DONE:
+                    return
+                yield chunk
+        finally:
+            aborted.set()
+
+    Thread(target=_produce, daemon=True, name='tar-stream').start()
+    # 附件名取净化后的作品号（作品号可能含非 ASCII/路径不友好字符）
+    safe = ''.join(c if (c.isalnum() or c in '._-') else '_' for c in str(arcname)) or 'work'
+    fname = f"{safe}.tar.gz"
+    return Response(_generate(), headers={
+        'Content-Type': 'application/gzip',
+        'Content-Disposition':
+            f"attachment; filename=\"{fname}\"; filename*=UTF-8''{urllib.parse.quote(fname)}",
+    })
+
+
 class DownloadApi:
-    """作品/下载队列管理端点：入队、停止、重排与下载配置更新。
+    """作品/下载队列管理端点：入队、停止、重排、产物 tar 下载与配置更新。
 
     Attributes:
         blueprint: 挂载全部路由的 Flask 蓝图。
@@ -302,6 +389,67 @@ class DownloadApi:
                     'success': False,
                     'error': f'作品重新入队失败: {str(e)}'
                 }), 500
+
+        # 把已下载作品的产物打成 tar.gz 流式下发；产物被手动移走时报错但保留
+        # finalPath（移回后无需任何操作即可再下），路径越界一律拒绝
+        @self.blueprint.route('/work_file', methods=['GET'])
+        def download_work_file():
+            """下载指定作品的产物（tar.gz 流式）。
+
+            Query:
+                workNumber（或 work_number）与 website。
+
+            Returns:
+                tar.gz 附件流；缺参 400，作品不存在 / 无产物路径 / 产物被移走
+                404（附说明 JSON，不动 finalPath），路径越界 404。
+            """
+            work_number = str(request.args.get('workNumber')
+                              or request.args.get('work_number') or '').strip()
+            website = str(request.args.get('website') or 'pixiv').strip() or 'pixiv'
+            if not work_number:
+                return jsonify({'success': False, 'error': '缺少作品ID (workNumber/work_number)'}), 400
+
+            try:
+                with DatabaseManager.get_db_session() as session:
+                    work = session.get(Works, (work_number, website))
+                    if work is None:
+                        return jsonify({'success': False,
+                                        'error': f'作品 {work_number}@{website} 不存在'}), 404
+                    final_path = work.finalPath
+            except Exception as e:
+                logger.error(f"查询作品产物失败: {e}")
+                return jsonify({'success': False, 'error': f'查询作品产物失败: {str(e)}'}), 500
+
+            if not final_path:
+                return jsonify({'success': False,
+                                'error': '该作品没有已记录的产物路径（旧数据或未成功下载）'}), 404
+
+            try:
+                root = Downloader.site_download_root(website)
+            except Exception as e:
+                logger.error(f"解析站点下载根失败: {e}")
+                return jsonify({'success': False, 'error': f'解析站点下载根失败: {str(e)}'}), 500
+
+            target = os.path.normpath(os.path.join(root, final_path))
+            # 双重越界检查：normpath 拦 .. 逃逸，realpath 拦符号链接指到下载根之外
+            real_root, real_target = os.path.realpath(root), os.path.realpath(target)
+            inside_norm = target == root or target.startswith(root + os.sep)
+            inside_real = real_target == real_root or real_target.startswith(real_root + os.sep)
+            if not (inside_norm and inside_real):
+                logger.warning(f"作品 {work_number}@{website} 产物路径越界，拒绝下载: {final_path}")
+                return jsonify({'success': False, 'error': '产物路径越界，拒绝访问'}), 404
+
+            if not os.path.exists(target):
+                # 用户可能手动移走：报错但不清 finalPath，移回后立即可再下
+                logger.warning(f"作品 {work_number}@{website} 的产物不存在: {target}（保留 finalPath）")
+                return jsonify({'success': False,
+                                'error': '产物不存在（可能已被移动或删除），路径记录已保留'}), 404
+
+            # 归档顶层：目录用作品号命名（作品子目录名由脚本自建，可能≠作品号）；
+            # 单文件保持原名（保留扩展名）
+            arcname = work_number if os.path.isdir(target) else os.path.basename(target)
+            logger.info(f"作品 {work_number}@{website} 产物打包下载: {target}")
+            return _tar_gz_stream(target, arcname)
 
 
                 

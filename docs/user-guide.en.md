@@ -72,6 +72,10 @@ Backing up = copying this directory; moving hosts = copying this directory.
   `stopped/failed/done` works can be **requeued** (state→inQueue).
   `noDownloader` is a suspended state: works whose site has no download script yet are not
   marked failed — once you upload a download script for that site they are requeued automatically.
+- **Artifact column**: successfully downloaded works record the artifact path (relative to
+  the site download root; legacy rows show "—"). Click "download" to stream the whole work
+  directory as a tar.gz. If you moved the files away, the row shows a red "missing" mark —
+  the recorded path is kept, and moving the files back makes downloads work again.
 
 ### 2.2 Positions
 
@@ -251,6 +255,9 @@ from dropdowns, add it via "Add site" on the Cookie tab first (writes back to `w
 - `use_cache: false`, or `cache_path` equal to `download_path`: treated as no staging
   layer — payloads stay where the script wrote them, nothing is moved.
 - Script code is identical in both modes; toggling the switch requires no script changes.
+- After a successful download the framework records the artifact path in the work's
+  `finalPath` (relative to `download_path/<site>/`); the works page uses it to offer the
+  tar.gz download. Manually moved files only surface as "missing" — the record is never cleared.
 
 ## 6. REST API Reference
 
@@ -263,6 +270,7 @@ Responses are `{"success": true/false, ...}`; entity identity is always `(id, we
 | `POST /api/update/update_now` | `{authorId, website?}` update one position immediately (background); `GET /api/update/update_now/status` for status |
 | `POST /api/download/add_work` | `{workNumber, website?, downloadInfo?}` enqueue a work |
 | `POST /api/download/stop_work` / `requeue_work` | stop / requeue |
+| `GET /api/download/work_file` | `{workNumber, website}` stream the artifact as tar.gz (404 if moved; recorded path kept) |
 | `GET /api/query/works` | filters: `website` (csv), `state` (csv, `none`=NULL), `author`, `date_field`+`date_from`+`date_to`, `keyword`, `sort`, `order`, `limit`, `offset` |
 | `GET /api/query/positions` | filter positions (with `workCount`) |
 | `GET /api/query/stats` | site×state counts (powers the stats strip) |

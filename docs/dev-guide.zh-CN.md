@@ -28,7 +28,8 @@ main.py ──► src/core/initialization.py（统一 init：文件→配置→�
 
 ## 2. 数据模型
 
-三张表全部以 `website` 入键（迁移历史：v1 multiWeb 初始结构；v2 user→publish_pos 更名）。
+三张表全部以 `website` 入键（迁移历史：v1 multiWeb 初始结构；v2 user→publish_pos 更名；
+v3 works 补 finalPath）。
 
 ```
 publish_pos（发布位点）       works                          upload
@@ -38,6 +39,7 @@ publish_pos（发布位点）       works                          upload
   state                      state / downloadDate           （多对多关联）
                              downloadPriority
                              otherInfo / downloadInfo
+                             finalPath（成功产物路径）
 ```
 
 ### 2.1 状态机

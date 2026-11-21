@@ -49,6 +49,7 @@ SpiderScheduler/
 > 命名说明：原 `user` 表已更名为 `publish_pos`（发布位点）——它的语义不是"我们的账号"，
 > 而是"对某站点某作者的追踪位点"；`userId` 列统一更名为 `authorId`（含 upload 表）。
 > 该变更由迁移 `0002_rename_user_to_publish_pos.py` 完成（schema v1 → v2）。
+> `0003_add_works_final_path.py` 为 works 补 `finalPath` 成功产物路径列（schema v2 → v3）。
 
 ```
 publish_pos（发布位点）       works                          upload
@@ -59,6 +60,7 @@ publish_pos（发布位点）       works                          upload
                               downloadDate
                               downloadPriority
                               otherInfo / downloadInfo
+                              finalPath（成功产物路径）
 ```
 
 ### 状态机（管线语义，代码与 API 共同遵守）
@@ -153,8 +155,9 @@ cookie 不存在时，用户在前端 Cookie 页点"去登录"：后端把 `webs
 启动独立调度线程——各自独立的线程池（`download_thread`）、轮间隔（`download_interval`，-1
 持续下载）、数量限制（`once_download_number`）、缓存与路径。站点循环内：回收中断残留 →
 按优先级认领本站任务（`state ∈ {inQueue, NULL}`）→ 认领即置 `downloading`，交线程池执行 →
-成功置 `done` 记录 `downloadDate`（下载期间被置 `stopped` 的亦如实记成功），异常仅把
-`downloading` 置 `failed`（不覆盖 `stopped`），站点无下载脚本置 `noDownloader` 挂起 → 轮末等任务收尾。
+成功置 `done` 记录 `downloadDate` 与 `finalPath`（产物目录相对站点级最终下载根的路径，
+下载期间被置 `stopped` 的亦如实记成功），异常仅把 `downloading` 置 `failed`（不覆盖
+`stopped`），站点无下载脚本置 `noDownloader` 挂起 → 轮末等任务收尾。
 站点级配置写在 `download.yaml` 的 `site` 结构（解析顺序 site.<website> > site.default > 代码内置兜底），支持运行中热更新
 （线程数除外，改动后重启进程或站点线程重建时生效）；全局 `do_download` 是总开关，
 站点级 `do_download: false` 可单独关站，开关恢复后守护线程自动重新拉起。
@@ -231,6 +234,7 @@ HH:MM 支持跨天，weekdays: 1=周一..7=周日，month_days 支持负数 -1=�
 | POST /api/download/add_work | 作品入队（可带 downloadInfo 对象） |
 | POST /api/download/stop_work | 停止下载（state→stopped） |
 | POST /api/download/requeue_work | 重新入队（failed/stopped/done → inQueue） |
+| GET /api/download/work_file | 产物 tar.gz 流式下载（被手动移走 404 但保留 finalPath；路径越界拒绝） |
 | POST /api/update/resume_pos | 恢复追踪位点（stopped → 追踪中） |
 | POST /api/update/update_now · GET /api/update/update_now/status | 立即对指定位点跑一轮更新（绕过周期调度）· 查询立即更新进度 |
 | PUT /api/{update,download}/config | 更新对应配置段 |
